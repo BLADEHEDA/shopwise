@@ -1,14 +1,13 @@
 "use client";
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Boxes, Search, History, SlidersHorizontal, Flag, Truck, Check, Upload } from "lucide-react";
+import { Boxes, Search, History, SlidersHorizontal, Flag, Truck, Check, Upload, Download, MoreVertical } from "lucide-react";
 import { useBiz } from "@/components/biz";
 import { useToast } from "@/components/toast";
-import { ProductThumb } from "@/components/product-photo";
-import { Alert, Badge, Button, Card, EmptyState, Field, Input, MoneyInput, PageHeader, Select, Sheet, Spinner, Stat, Tabs, Textarea } from "@/components/ui";
+import { Alert, Badge, Button, Card, EmptyState, Field, Input, MoneyInput, PageHeader, Select, Sheet, Spinner, Tabs, Textarea } from "@/components/ui";
 import { supabase } from "@/lib/supabase";
-import { fmtMoney, minorToDecimal, toMinor } from "@/lib/money";
+import { fmtMoney, fmtNumber, minorToDecimal, toMinor } from "@/lib/money";
 import { cx, downloadCsv, errorMessage, fmtDate, fmtDateTime } from "@/lib/format";
 import type { Product } from "@/lib/types";
 
@@ -22,16 +21,13 @@ type Tab = "levels" | "movements" | "purchases" | "flags";
 
 function InventoryInner() {
   const biz = useBiz();
-  const { business, sections } = biz;
+  const { business } = biz;
   const params = useSearchParams();
   const toast = useToast();
   const cur = business.currency;
   const [tab, setTab] = useState<Tab>("levels");
   const [products, setProducts] = useState<Product[] | null>(null);
   const [costs, setCosts] = useState<Record<string, number>>({});
-  const [q, setQ] = useState("");
-  const [section, setSection] = useState("all");
-  const [lowOnly, setLowOnly] = useState(params.get("filter") === "low");
   const [adjust, setAdjust] = useState<Product | null>(null);
   const [history, setHistory] = useState<Product | null>(null);
   const [flagFor, setFlagFor] = useState<Product | null>(null);
@@ -45,17 +41,6 @@ function InventoryInner() {
   }, [business.id, biz.costsAnywhere]);
   useEffect(load, [load]);
 
-  const list = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    return (products || []).filter((p) => (section === "all" || p.section_id === section) && (!lowOnly || p.stock_qty <= p.low_stock_threshold) &&
-      (!s || [p.name, p.brand, p.model, p.sku, p.variant_label].some((v) => v && v.toLowerCase().includes(s))));
-  }, [products, q, section, lowOnly]);
-
-  const valueRows = list.filter((p) => biz.canViewCosts(p.section_id) && costs[p.id] !== undefined);
-  const stockValue = valueRows.reduce((a, p) => a + toMinor(costs[p.id]) * p.stock_qty, 0);
-  const retailValue = list.reduce((a, p) => a + toMinor(p.target_price) * p.stock_qty, 0);
-  const lowCount = (products || []).filter((p) => p.stock_qty <= p.low_stock_threshold).length;
-  const secName = (id: string) => sections.find((s) => s.id === id)?.name || "";
 
   const tabs: { value: Tab; label: string }[] = [{ value: "levels", label: "Stock levels" }];
   if (biz.canManageAny || biz.canReport) tabs.push({ value: "movements", label: "Movement history" });
@@ -73,69 +58,10 @@ function InventoryInner() {
         )} />
       {tabs.length > 1 && <Tabs value={tab} onChange={setTab} items={tabs} />}
 
-      {tab === "levels" && (
-        <>
-          {biz.canManageAny && (
-            <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <Stat label="Products" value={list.length} />
-              <Stat label="Low / out of stock" value={lowCount} tone={lowCount ? "warning" : undefined} />
-              <Stat label="Value at target price" value={fmtMoney(minorToDecimal(retailValue), cur)} />
-              {biz.costsAnywhere && <Stat label="Stock value (cost)" value={fmtMoney(minorToDecimal(stockValue), cur)} sub="Weighted average landed cost" />}
-            </div>
-          )}
-          <div className="mb-3 grid gap-2 sm:grid-cols-[1fr_auto_auto]">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-              <Input className="pl-9" placeholder="Search products" value={q} onChange={(e) => setQ(e.target.value)} />
-            </div>
-            <Select value={section} onChange={(e) => setSection(e.target.value)} aria-label="Section">
-              <option value="all">All sections</option>{sections.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </Select>
-            <label className="flex h-11 items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 text-sm font-medium">
-              <input type="checkbox" className="size-4 accent-brand" checked={lowOnly} onChange={(e) => setLowOnly(e.target.checked)} /> Low stock only
-            </label>
-          </div>
-          {products === null ? <Spinner /> : list.length === 0 ? (
-            <EmptyState icon={<Boxes className="size-6" />} title={lowOnly ? "Nothing is low on stock" : "No products"}>{lowOnly ? "Every product is above its alert level." : "Add products first."}</EmptyState>
-          ) : (
-            <Card>
-              <ul className="divide-y divide-slate-100">
-                {list.map((p) => {
-                  const low = p.stock_qty <= p.low_stock_threshold;
-                  const manage = biz.canManage(p.section_id);
-                  return (
-                    <li key={p.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
-                      <div className="size-10 shrink-0 overflow-hidden rounded-lg"><ProductThumb product={p} iconClass="size-5" /></div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate font-medium">{p.name}{p.variant_label ? ` (${p.variant_label})` : ""}</p>
-                        <p className="text-xs text-slate-500">{secName(p.section_id)} · alert at {p.low_stock_threshold}{biz.canViewCosts(p.section_id) && costs[p.id] !== undefined ? ` · cost ${fmtMoney(costs[p.id], cur)}` : ""}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className={cx("tabular text-lg font-bold", p.stock_qty === 0 ? "text-red-600" : low ? "text-amber-700" : "text-ink")}>{p.stock_qty}</p>
-                        {low && <Badge tone={p.stock_qty === 0 ? "danger" : "warning"}>{p.stock_qty === 0 ? "Out" : "Low"}</Badge>}
-                      </div>
-                      <div className="flex gap-1">
-                        {manage && <Button size="sm" variant="secondary" onClick={() => setAdjust(p)} aria-label={`Adjust ${p.name}`}><SlidersHorizontal className="size-4" /><span className="hidden sm:inline">Adjust</span></Button>}
-                        {(manage || biz.canReport) && <Button size="sm" variant="ghost" onClick={() => setHistory(p)} aria-label={`History of ${p.name}`}><History className="size-4" /></Button>}
-                        {!manage && <Button size="sm" variant="secondary" onClick={() => setFlagFor(p)}><Flag className="size-4" /> Report</Button>}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </Card>
-          )}
-          {biz.canManageAny && list.length > 0 && (
-            <div className="mt-3 text-right">
-              <Button variant="ghost" size="sm" onClick={() => downloadCsv(`stock-${new Date().toISOString().slice(0, 10)}.csv`, [
-                ["section", "product", "variant", "stock", "low_stock_threshold", ...(biz.costsAnywhere ? ["avg_cost", "stock_value"] : [])],
-                ...list.map((p) => [secName(p.section_id), p.name, p.variant_label, p.stock_qty, p.low_stock_threshold,
-                  ...(biz.costsAnywhere ? (biz.canViewCosts(p.section_id) ? [costs[p.id] ?? "", minorToDecimal(toMinor(costs[p.id] ?? 0) * p.stock_qty)] : ["", ""]) : [])]),
-              ])}>Export CSV</Button>
-            </div>
-          )}
-        </>
-      )}
+      {tab === "levels" && (products === null ? <Spinner /> : (
+        <StockTable products={products} costs={costs} lowFirst={params.get("filter") === "low"}
+          onAdjust={setAdjust} onHistory={setHistory} onFlag={setFlagFor} />
+      ))}
 
       {tab === "movements" && <Movements />}
       {tab === "purchases" && <Purchases cur={cur} />}
@@ -144,6 +70,249 @@ function InventoryInner() {
       {adjust && <AdjustSheet product={adjust} onClose={() => setAdjust(null)} onDone={() => { setAdjust(null); load(); toast("Stock updated"); }} />}
       {history && <HistorySheet product={history} onClose={() => setHistory(null)} />}
       {flagFor && <FlagSheet product={flagFor} onClose={() => setFlagFor(null)} onDone={() => { setFlagFor(null); toast("Thanks, the manager has been notified"); }} />}
+    </div>
+  );
+}
+
+
+type SortKey = "category" | "name" | "amount" | "quantity";
+type Row = Product & { cost: number | null; amount: number | null; sellValue: number | null };
+
+/** Excel-like stock table: Item | Cost price | Quantity | Amount (cost x quantity),
+ *  grouped by category with subtotals, totals at the top. No images here:
+ *  photos live in Products. */
+function StockTable({ products, costs, lowFirst, onAdjust, onHistory, onFlag }: {
+  products: Product[]; costs: Record<string, number>; lowFirst: boolean;
+  onAdjust: (p: Product) => void; onHistory: (p: Product) => void; onFlag: (p: Product) => void;
+}) {
+  const biz = useBiz();
+  const { business, sections } = biz;
+  const cur = business.currency;
+  const [q, setQ] = useState("");
+  const [section, setSection] = useState("all");
+  const [category, setCategory] = useState("all");
+  const [lowOnly, setLowOnly] = useState(lowFirst);
+  const [sort, setSort] = useState<SortKey>("category");
+  const [showSell, setShowSell] = useState(false);
+  const [menu, setMenu] = useState<Row | null>(null);
+  const seeCosts = biz.costsAnywhere;
+
+  const rows: Row[] = useMemo(() => products.map((p) => {
+    const c = biz.canViewCosts(p.section_id) ? costs[p.id] : undefined;
+    const cost = c !== undefined && c > 0 ? c : null;
+    return { ...p, cost, amount: cost !== null ? (toMinor(cost) * p.stock_qty) / 100 : null,
+      sellValue: p.target_price !== null ? (toMinor(p.target_price) * p.stock_qty) / 100 : null };
+  }), [products, costs, biz]);
+
+  const categories = useMemo(() => Array.from(new Set(rows.map((r) => r.categories?.name || "No category"))).sort((a, b) => a.localeCompare(b)), [rows]);
+  const list = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    const out = rows.filter((p) => (section === "all" || p.section_id === section)
+      && (category === "all" || (p.categories?.name || "No category") === category)
+      && (!lowOnly || p.stock_qty <= p.low_stock_threshold)
+      && (!s || [p.name, p.brand, p.model, p.sku, p.variant_label, p.categories?.name].some((v) => v && v.toLowerCase().includes(s))));
+    const byName = (a: Row, b: Row) => a.name.localeCompare(b.name);
+    if (sort === "name") out.sort(byName);
+    else if (sort === "amount") out.sort((a, b) => (b.amount ?? -1) - (a.amount ?? -1) || byName(a, b));
+    else if (sort === "quantity") out.sort((a, b) => b.stock_qty - a.stock_qty || byName(a, b));
+    else out.sort((a, b) => (a.categories?.name || "~").localeCompare(b.categories?.name || "~") || byName(a, b));
+    return out;
+  }, [rows, q, section, category, lowOnly, sort]);
+
+  const sum = (rs: Row[]) => ({
+    qty: rs.reduce((a, r) => a + r.stock_qty, 0),
+    amount: rs.reduce((a, r) => a + toMinor(r.amount ?? 0), 0) / 100,
+    sell: rs.reduce((a, r) => a + toMinor(r.sellValue ?? 0), 0) / 100,
+    noCost: rs.filter((r) => r.cost === null && r.stock_qty > 0).length,
+    noPrice: rs.filter((r) => r.target_price === null && r.stock_qty > 0).length,
+    low: rs.filter((r) => r.stock_qty <= r.low_stock_threshold).length,
+  });
+  const total = sum(list);
+  const filtered = list.length !== rows.length;
+
+  const groups: { name: string; rows: Row[] }[] = [];
+  if (sort === "category") for (const r of list) {
+    const n = r.categories?.name || "No category";
+    const g = groups[groups.length - 1];
+    if (g && g.name === n) g.rows.push(r); else groups.push({ name: n, rows: [r] });
+  } else groups.push({ name: "", rows: list });
+
+  const colCount = 3 + (seeCosts ? 2 : 0) + (showSell ? 2 : 0);
+  const money = (v: number | null) => (v === null ? "—" : fmtMoney(v, cur));
+
+  function exportCsv() {
+    const head = ["Category", "Item", ...(seeCosts ? ["Cost price"] : []), "Quantity", ...(seeCosts ? ["Amount"] : []), ...(showSell ? ["Selling price", "Sales value"] : [])];
+    const line = (r: Row) => [r.categories?.name || "", r.name + (r.variant_label ? ` (${r.variant_label})` : ""), ...(seeCosts ? [r.cost ?? ""] : []), r.stock_qty, ...(seeCosts ? [r.amount ?? ""] : []), ...(showSell ? [r.target_price ?? "", r.sellValue ?? ""] : [])];
+    downloadCsv(`inventory-${new Date().toISOString().slice(0, 10)}.csv`, [head, ...list.map(line), [], ["TOTAL", "", ...(seeCosts ? [""] : []), total.qty, ...(seeCosts ? [total.amount] : []), ...(showSell ? ["", total.sell] : [])]]);
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* totals first: no scrolling to the bottom */}
+      <Card className="border-brand-200 bg-brand-50 p-4">
+        <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+          {seeCosts ? (
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-brand-800">Stock value at cost{filtered ? " (filtered)" : ""}</p>
+              <p className="tabular text-3xl font-bold text-brand-800">{fmtMoney(total.amount, cur)}</p>
+            </div>
+          ) : (
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-brand-800">Items in stock{filtered ? " (filtered)" : ""}</p>
+              <p className="tabular text-3xl font-bold text-brand-800">{total.qty.toLocaleString("en-US")}</p>
+            </div>
+          )}
+          {showSell && (
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-emerald-800">At selling price</p>
+              <p className="tabular text-2xl font-bold text-emerald-800">{fmtMoney(total.sell, cur)}</p>
+            </div>
+          )}
+        </div>
+        <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-sm text-brand-800/90">
+          {seeCosts && <span><b className="tabular">{total.qty.toLocaleString("en-US")}</b> items</span>}
+          <span><b>{list.length}</b> products</span>
+          <span><b>{new Set(list.map((r) => r.categories?.name || "")).size}</b> categories</span>
+          {total.low > 0 && <button onClick={() => setLowOnly(!lowOnly)} className="font-semibold text-amber-800 underline">{total.low} low / out{lowOnly ? " (showing)" : ""}</button>}
+          {seeCosts && total.noCost > 0 && <span className="text-amber-800">{total.noCost} without cost</span>}
+          {showSell && total.noPrice > 0 && <span className="text-amber-800">{total.noPrice} without selling price</span>}
+        </p>
+      </Card>
+
+      <div className="space-y-2">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+          <Input className="pl-9" placeholder="Search item, brand, category" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+          {categories.length > 1 && (
+            <div className="min-w-0 sm:w-52">
+              <Select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Category">
+                <option value="all">All categories</option>{categories.map((c) => <option key={c} value={c}>{c}</option>)}
+              </Select>
+            </div>
+          )}
+          <div className="min-w-0 sm:w-52">
+            <Select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} aria-label="Sort by">
+              <option value="category">By category</option><option value="name">By name (A–Z)</option>
+              {seeCosts && <option value="amount">Highest amount first</option>}<option value="quantity">Most in stock first</option>
+            </Select>
+          </div>
+          {sections.length > 1 && (
+            <div className="min-w-0 sm:w-52">
+              <Select value={section} onChange={(e) => setSection(e.target.value)} aria-label="Section">
+                <option value="all">All sections</option>{sections.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </Select>
+            </div>
+          )}
+          <button onClick={() => setShowSell(!showSell)} aria-pressed={showSell}
+            className={cx("h-11 rounded-xl border px-3 text-sm font-medium", showSell ? "border-emerald-600 bg-emerald-50 text-emerald-800" : "border-slate-300 bg-white text-slate-700")}>
+            {showSell ? "✓ Selling prices" : "Show selling prices"}
+          </button>
+          {lowOnly && <button onClick={() => setLowOnly(false)} className="h-11 rounded-xl bg-amber-100 px-3 text-sm font-medium text-amber-900">Low stock only ✕</button>}
+        </div>
+      </div>
+
+      {list.length === 0 ? (
+        <Card><EmptyState icon={<Boxes className="size-6" />} title={rows.length ? "Nothing matches" : "No stock yet"} action={!rows.length && biz.canManageAny ? <Link href="/app/products/import?mode=stock"><Button>Import stock</Button></Link> : undefined}>{rows.length ? "Try another search or filter." : "Import your stock list to see it here."}</EmptyState></Card>
+      ) : (
+        <Card className="overflow-hidden">
+          <div className="max-h-[75vh] overflow-auto">
+            <table className="w-full border-collapse text-[13px] sm:text-sm">
+              <thead className="sticky top-0 z-10 bg-slate-800 text-left text-xs font-semibold uppercase tracking-wide text-white">
+                <tr>
+                  <th className="px-2 py-2.5 sm:px-3">Item</th>
+                  {seeCosts && <th className="px-2 py-2.5 sm:px-3 text-right"><span className="sm:hidden">Cost</span><span className="hidden sm:inline">Cost price</span></th>}
+                  <th className="px-2 py-2.5 sm:px-3 text-right">Qty</th>
+                  {seeCosts && <th className="px-2 py-2.5 sm:px-3 text-right">Amount</th>}
+                  {showSell && <th className="px-2 py-2.5 sm:px-3 text-right">Sell price</th>}
+                  {showSell && <th className="px-2 py-2.5 sm:px-3 text-right">Sales value</th>}
+                  <th className="hidden w-8 px-1 py-2.5 sm:table-cell" aria-label="Actions" />
+                </tr>
+              </thead>
+              <tbody>
+                {groups.map((g) => {
+                  const st = sum(g.rows);
+                  return (
+                    <Fragment key={g.name || "all"}>
+                      {g.name && (
+                        <tr className="bg-brand-50">
+                          <td colSpan={colCount + 1} className="px-2 py-2 sm:px-3 text-xs font-bold uppercase tracking-wide text-brand-800">{g.name}</td>
+                        </tr>
+                      )}
+                      {g.rows.map((r, i) => {
+                        const low = r.stock_qty <= r.low_stock_threshold;
+                        return (
+                          <tr key={r.id} onClick={() => setMenu(r)} className={cx("cursor-pointer border-t border-slate-100 hover:bg-slate-50", i % 2 === 1 && "bg-slate-50/50")}>
+                            <td className="px-2 py-2 [overflow-wrap:anywhere] sm:px-3">
+                              <span className="font-medium">{r.name}</span>{r.variant_label ? <span className="text-slate-500"> ({r.variant_label})</span> : null}
+                              {sort !== "category" && r.categories?.name && <span className="block text-xs text-slate-500">{r.categories.name}</span>}
+                            </td>
+                            {seeCosts && <td className={cx("tabular whitespace-nowrap px-2 py-2 sm:px-3 text-right", r.cost === null && "text-slate-400")}>{r.cost === null ? "—" : fmtNumber(r.cost)}</td>}
+                            <td className="tabular whitespace-nowrap px-2 py-2 sm:px-3 text-right">
+                              <span className={cx("font-semibold", r.stock_qty === 0 ? "text-red-600" : low ? "text-amber-700" : "")}>{r.stock_qty}</span>
+                              {low && <span className={cx("block text-[10px] leading-none sm:ml-1 sm:inline font-semibold uppercase", r.stock_qty === 0 ? "text-red-600" : "text-amber-700")}>{r.stock_qty === 0 ? "out" : "low"}</span>}
+                            </td>
+                            {seeCosts && <td className={cx("tabular whitespace-nowrap px-2 py-2 sm:px-3 text-right font-semibold", r.amount === null && "font-normal text-slate-400")}>{r.amount === null ? "—" : fmtNumber(r.amount)}</td>}
+                            {showSell && <td className="tabular whitespace-nowrap px-2 py-2 sm:px-3 text-right">{r.target_price === null ? <span className="text-slate-400">—</span> : fmtNumber(r.target_price)}</td>}
+                            {showSell && <td className="tabular whitespace-nowrap px-2 py-2 sm:px-3 text-right">{r.sellValue === null ? <span className="text-slate-400">—</span> : fmtNumber(r.sellValue)}</td>}
+                            <td className="hidden px-1 py-2 text-slate-400 sm:table-cell"><MoreVertical className="size-4" /></td>
+                          </tr>
+                        );
+                      })}
+                      {g.name && (
+                        <tr className="border-t border-slate-300 bg-slate-100 text-xs font-semibold text-slate-700">
+                          <td className="px-2 py-1.5 sm:px-3">Subtotal · {g.rows.length} item{g.rows.length === 1 ? "" : "s"}</td>
+                          {seeCosts && <td />}
+                          <td className="tabular px-2 py-1.5 sm:px-3 text-right">{st.qty}</td>
+                          {seeCosts && <td className="tabular whitespace-nowrap px-2 py-1.5 sm:px-3 text-right">{fmtNumber(st.amount)}</td>}
+                          {showSell && <td />}
+                          {showSell && <td className="tabular whitespace-nowrap px-2 py-1.5 sm:px-3 text-right">{fmtNumber(st.sell)}</td>}
+                          <td className="hidden sm:table-cell" />
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+              <tfoot className="sticky bottom-0 bg-slate-800 text-sm font-bold text-white">
+                <tr>
+                  <td className="px-2 py-2.5 sm:px-3">TOTAL<span className="hidden sm:inline"> · {list.length} items</span></td>
+                  {seeCosts && <td />}
+                  <td className="tabular px-2 py-2.5 sm:px-3 text-right">{total.qty.toLocaleString("en-US")}</td>
+                  {seeCosts && <td className="tabular whitespace-nowrap px-2 py-2.5 sm:px-3 text-right">{fmtNumber(total.amount)}</td>}
+                  {showSell && <td />}
+                  {showSell && <td className="tabular whitespace-nowrap px-2 py-2.5 sm:px-3 text-right">{fmtNumber(total.sell)}</td>}
+                  <td className="hidden sm:table-cell" />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </Card>
+      )}
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+        <span>{seeCosts ? "Amount = cost price × quantity (weighted average cost, includes freight from purchases). " : ""}Tap a row to adjust stock or see its history.</span>
+        {list.length > 0 && biz.canReport && <Button variant="ghost" size="sm" onClick={exportCsv}><Download className="size-4" /> Export CSV</Button>}
+      </div>
+
+      {menu && (
+        <Sheet open onClose={() => setMenu(null)} title={menu.name + (menu.variant_label ? ` (${menu.variant_label})` : "")}>
+          <dl className="mb-4 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+            <dt className="text-slate-500">Category</dt><dd>{menu.categories?.name || "—"}</dd>
+            <dt className="text-slate-500">Section</dt><dd>{sections.find((s) => s.id === menu.section_id)?.name}</dd>
+            {seeCosts && <><dt className="text-slate-500">Cost price</dt><dd className="tabular">{money(menu.cost)}</dd></>}
+            <dt className="text-slate-500">Quantity</dt><dd className="tabular font-semibold">{menu.stock_qty} <span className="font-normal text-slate-500">(alert at {menu.low_stock_threshold})</span></dd>
+            {seeCosts && <><dt className="text-slate-500">Amount</dt><dd className="tabular font-semibold">{money(menu.amount)}</dd></>}
+            <dt className="text-slate-500">Selling price</dt><dd className="tabular">{menu.target_price === null ? "Not set" : `${fmtMoney(menu.target_price, cur)} (min ${fmtMoney(menu.min_price, cur)})`}</dd>
+          </dl>
+          <div className="grid gap-2">
+            {biz.canManage(menu.section_id) && <Button onClick={() => { onAdjust(menu); setMenu(null); }}><SlidersHorizontal className="size-4" /> Adjust stock</Button>}
+            {(biz.canManage(menu.section_id) || biz.canReport) && <Button variant="secondary" onClick={() => { onHistory(menu); setMenu(null); }}><History className="size-4" /> Stock history</Button>}
+            {biz.canManage(menu.section_id) && <Link href={`/app/products/edit?id=${menu.id}`}><Button variant="secondary" block>Edit product, prices & photo</Button></Link>}
+            {!biz.canManage(menu.section_id) && <Button variant="secondary" onClick={() => { onFlag(menu); setMenu(null); }}><Flag className="size-4" /> Report low stock / arrival</Button>}
+          </div>
+        </Sheet>
+      )}
     </div>
   );
 }
