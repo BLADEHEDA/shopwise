@@ -13,7 +13,7 @@ The product name is not hard-coded. It is read from the `brand_config` table, so
 ### 1. Create the database (Supabase)
 
 1. Create a free project at [supabase.com](https://supabase.com) (region: *West EU* or *Frankfurt* is closest to Cameroon).
-2. Open **SQL Editor → New query**, paste the whole of [`supabase/migrations/0001_shopwise.sql`](supabase/migrations/0001_shopwise.sql) and click **Run**. This creates every table, the security rules (RLS), the transaction functions and the `shopwise` storage bucket for images. Then do the same, in order, for every later file in `supabase/migrations/` (`0002_…`, `0003_…`). Each later file is safe to run more than once.
+2. **Database tables are created and upgraded automatically** on every production deploy (`scripts/migrate.mjs` runs every file in `supabase/migrations/` that hasn't run yet). You only need to give Vercel the database address once: see `DATABASE_URL` below. *(Older setup: pasting the SQL files into the SQL editor still works; the script detects that and continues from there.)*
 3. **Authentication → URL Configuration**: set **Site URL** to your Vercel URL (e.g. `https://shopwise.vercel.app`) and add `https://shopwise.vercel.app/**` to **Redirect URLs**.
 4. *(Optional, faster onboarding)* **Authentication → Sign In / Providers → Email**: turn off **Confirm email** so new staff can sign in immediately after accepting an invite. Leave it on if you want email verification.
 5. **Project Settings → API**: copy the **Project URL** and the **anon public** key.
@@ -30,6 +30,7 @@ The product name is not hard-coded. It is read from the `brand_config` table, so
    |---|---|
    | `NEXT_PUBLIC_SUPABASE_URL` | your Project URL |
    | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | your anon public key |
+   | `DATABASE_URL` | Supabase → **Connect** → *Session pooler* connection string, with `[YOUR-PASSWORD]` replaced by your database password. Used only during the build to upgrade the database; never sent to browsers. |
 
 3. Click **Deploy**. Then go back to Supabase step 3 and put in the real Vercel URL.
 
@@ -50,7 +51,7 @@ The product name is not hard-coded. It is read from the `brand_config` table, so
 
 ## Preparing an inventory sheet for import
 
-Any shop can upload its own Excel (.xlsx) or CSV. It works if:
+Any shop can upload its own **Excel (.xlsx), CSV or PDF** (a PDF *exported* from Excel/Google Sheets; scanned photos can't be read). Nobody runs SQL: it's all in **Inventory → Import stock**. It works if:
 
 1. **There is a heading row** with at least a name column: `Item` / `Name` / `Product`. Optional: `Cost Price`, `Quantity`, `Selling price` / `Target price`, `Min price`, `Category`, `Section`, `Brand`, `SKU`.
 2. **One product per row.** Numbers only in number columns (`1,500` and `1500 FCFA` are fine).

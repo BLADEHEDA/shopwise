@@ -40,10 +40,16 @@ function ImportInner() {
         const readXlsxFile = (await import("read-excel-file/browser")).default;
         const all = await readXlsxFile(f);
         sheets = all.map((s) => ({ name: s.sheet, rows: s.data as Cell[][] }));
+      } else if (/\.pdf$/i.test(f.name)) {
+        const { readPdfFile } = await import("@/lib/pdf-table");
+        const pdf = await readPdfFile(f);
+        if (!pdf.rows.length) { setErr("This PDF has no readable text: it's probably a scan or a photo. Export the inventory from Excel or Google Sheets as PDF (or upload the Excel file itself)."); return; }
+        if (!pdf.found) { setErr("Couldn't find the column headings in this PDF. The table needs a heading row such as: Item | Cost Price | Quantity."); return; }
+        sheets = [{ name: f.name, rows: pdf.rows }];
       } else if (/\.(csv|txt)$/i.test(f.name)) {
         sheets = [{ name: f.name, rows: Papa.parse<string[]>(await f.text(), { skipEmptyLines: false }).data }];
       } else {
-        setErr("Choose an .xlsx or .csv file. In Google Sheets: File → Download → Microsoft Excel (.xlsx). Old .xls files: open in Excel and 'Save as' .xlsx.");
+        setErr("Choose an Excel (.xlsx), CSV or PDF file. Old .xls files: open in Excel and 'Save as' .xlsx.");
         return;
       }
       const p = parseSheets(sheets);
@@ -137,15 +143,15 @@ function ImportInner() {
     <div className="space-y-4">
       <Link href={stockMode ? "/app/inventory" : "/app/products"} className="inline-flex items-center gap-1 text-sm font-medium text-slate-600"><ChevronLeft className="size-4" /> {stockMode ? "Inventory" : "Products"}</Link>
       <PageHeader title={stockMode ? "Import stock" : "Import products"}
-        subtitle={stockMode ? "Upload your stock sheet: new items are created, existing items get the quantity added. Nothing is saved until you confirm." : "From Excel (.xlsx) or CSV, e.g. your inventory Google Sheet. Nothing is saved until you confirm."}
+        subtitle={stockMode ? "Upload your stock sheet (Excel, CSV or PDF): new items are created, existing items get the quantity added. Nothing is saved until you confirm." : "From Excel (.xlsx), CSV or PDF, e.g. your inventory sheet. Nothing is saved until you confirm."}
         actions={<Button variant="secondary" onClick={template}><Download className="size-4" /> Template</Button>} />
 
       <Card className="p-4">
         <label className="flex cursor-pointer flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-slate-300 p-8 text-center hover:border-brand hover:bg-brand-50">
           <FileSpreadsheet className="size-10 text-brand" />
           <span className="font-semibold">{file || "Choose a file"}</span>
-          <span className="text-sm text-slate-500">{parsed ? `${rows.length} products found · tap to choose another` : "Google Sheets: File → Download → Microsoft Excel (.xlsx)"}</span>
-          <input type="file" accept=".xlsx,.csv,.txt" className="sr-only" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
+          <span className="text-sm text-slate-500">{parsed ? `${rows.length} products found · tap to choose another` : "Excel (.xlsx), CSV, or a PDF exported from Excel / Google Sheets"}</span>
+          <input type="file" accept=".xlsx,.csv,.txt,.pdf,application/pdf" className="sr-only" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
         </label>
         {err && <Alert tone="danger" className="mt-3">{err}</Alert>}
         {!parsed && <p className="mt-3 text-xs text-slate-500">Title rows, category headings (e.g. PHONE CHARGERS, CABLE), Total rows and an Amount column are recognised and skipped automatically. Selling prices are optional: you can set them after importing.</p>}
