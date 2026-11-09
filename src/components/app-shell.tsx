@@ -49,7 +49,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     { href: "/app/pos", label: "New sale", icon: ShoppingCart, show: sells },
     { href: "/app/sales", label: "Sales", icon: Receipt, show: true },
     { href: "/app/products", label: "Products", icon: Package, show: true },
-    { href: "/app/inventory", label: "Inventory", icon: Boxes, show: true },
+    { href: "/app/inventory", label: "Inventory", icon: Boxes, show: biz.role !== "staff" },
     { href: "/app/shifts", label: biz.role === "staff" ? "My shifts" : "Staff & shifts", icon: Clock, show: true },
     { href: "/app/expenses", label: "Expenses", icon: Wallet, show: true },
     { href: "/app/approvals", label: "Approvals", icon: ClipboardCheck, badge: approvals, show: biz.canApproveAny },

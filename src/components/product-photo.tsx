@@ -54,16 +54,17 @@ export function ProductThumb({ product, className, iconClass = "size-6" }: { pro
   );
 }
 
-/** Upload a product photo straight from the phone camera. Managers can set or
- *  replace any photo in their sections; shopkeepers can only add a photo to a
- *  product that has none (enforced in the database). */
-export function PhotoButton({ product, onDone, label }: { product: Pick<Product, "id" | "business_id" | "section_id" | "image_url">; onDone: (url: string) => void; label?: string }) {
+type Up = Pick<Product, "id" | "business_id" | "section_id" | "image_url">;
+
+/** Who may set a photo: managers can set or replace any photo in their
+ *  sections; shopkeepers can only add one where there is none (also enforced
+ *  in the database by set_product_image). */
+function usePhotoUpload(product: Up, onDone: (url: string) => void) {
   const biz = useBiz();
   const toast = useToast();
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const allowed = biz.canManage(product.section_id) || (biz.role === "staff" && biz.hasSection(product.section_id) && !product.image_url);
-  if (!allowed) return null;
 
   async function onFile(file: File) {
     if (!file.type.startsWith("image/")) { toast("Choose a photo", "error"); return; }
@@ -77,20 +78,54 @@ export function PhotoButton({ product, onDone, label }: { product: Pick<Product,
       const { error } = await supabase().rpc("set_product_image", { p_product: product.id, p_url: url });
       if (error) throw error;
       onDone(url);
-      toast("Photo saved");
+      toast(product.image_url ? "Photo changed" : "Photo saved");
     } catch (e) { toast(errorMessage(e), "error"); } finally { setBusy(false); if (input.current) input.current.value = ""; }
   }
+  const open = (e?: React.MouseEvent) => { e?.preventDefault(); e?.stopPropagation(); input.current?.click(); };
+  // no `capture`: phones then offer both camera and gallery
+  const field = <input ref={input} type="file" accept="image/*" className="sr-only" tabIndex={-1} onClick={(e) => e.stopPropagation()}
+    onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />;
+  return { allowed, busy, open, field };
+}
 
+/** A button that adds or changes a product photo. */
+export function PhotoButton({ product, onDone, label }: { product: Up; onDone: (url: string) => void; label?: string }) {
+  const u = usePhotoUpload(product, onDone);
+  if (!u.allowed) return null;
   return (
     <>
-      <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); input.current?.click(); }} disabled={busy}
+      <button type="button" onClick={u.open} disabled={u.busy}
         className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-2.5 text-sm font-medium text-slate-700 hover:border-brand hover:text-brand disabled:opacity-50"
         aria-label={`${product.image_url ? "Change" : "Add"} photo`}>
-        {busy ? <LoaderCircle className="size-4 animate-spin" /> : <Camera className="size-4" />}
-        {label ?? (product.image_url ? "Change" : "Photo")}
+        {u.busy ? <LoaderCircle className="size-4 animate-spin" /> : <Camera className="size-4" />}
+        {label ?? (product.image_url ? "Change photo" : "Add photo")}
       </button>
-      <input ref={input} type="file" accept="image/*" capture="environment" className="sr-only" tabIndex={-1}
-        onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
+      {u.field}
+    </>
+  );
+}
+
+/** The product picture itself, editable in place: on a computer hovering shows
+ *  "Change", on a phone a small camera badge sits on the corner; tap to pick a
+ *  new photo. People who can't edit just see the picture. */
+export function EditablePhoto({ product, onDone, className, iconClass = "size-5" }: { product: Up & P; onDone: (url: string) => void; className?: string; iconClass?: string }) {
+  const u = usePhotoUpload(product, onDone);
+  const box = cx("relative shrink-0 overflow-hidden rounded-lg", className);
+  if (!u.allowed) return <div className={box}><ProductThumb product={product} iconClass={iconClass} /></div>;
+  return (
+    <>
+      <button type="button" onClick={u.open} disabled={u.busy} className={cx("group", box)}
+        aria-label={`${product.image_url ? "Change" : "Add"} photo of ${product.name}`} title={product.image_url ? "Change photo" : "Add photo"}>
+        <ProductThumb product={product} iconClass={iconClass} />
+        <span className="absolute inset-0 hidden flex-col place-items-center content-center justify-center gap-0.5 bg-ink/55 text-[10px] font-semibold text-white [@media(hover:hover)]:group-hover:flex">
+          <Camera className="mx-auto size-4" />{product.image_url ? "Change" : "Add"}
+        </span>
+        <span className="absolute bottom-0.5 right-0.5 grid size-[18px] place-items-center rounded-full bg-white text-brand shadow ring-1 ring-slate-200 [@media(hover:hover)]:hidden">
+          <Camera className="size-2.5" />
+        </span>
+        {u.busy && <span className="absolute inset-0 grid place-items-center bg-white/70"><LoaderCircle className="size-4 animate-spin text-brand" /></span>}
+      </button>
+      {u.field}
     </>
   );
 }

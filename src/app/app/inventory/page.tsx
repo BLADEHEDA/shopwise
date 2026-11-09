@@ -1,7 +1,7 @@
 "use client";
 import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Boxes, Search, History, SlidersHorizontal, Flag, Truck, Check, Upload, Download, MoreVertical } from "lucide-react";
 import { useBiz } from "@/components/biz";
 import { useToast } from "@/components/toast";
@@ -10,6 +10,7 @@ import { supabase } from "@/lib/supabase";
 import { fmtMoney, fmtNumber, minorToDecimal, toMinor } from "@/lib/money";
 import { cx, downloadCsv, errorMessage, fmtDate, fmtDateTime } from "@/lib/format";
 import type { Product } from "@/lib/types";
+import { FlagSheet, NotSet } from "@/components/stock-bits";
 
 interface Movement { id: string; product_id: string; kind: string; qty_change: number; balance_after: number; reason: string | null; ref_type: string | null; ref_id: string | null; created_at: string; profiles?: { full_name: string | null } | null; products?: { name: string; variant_label: string | null } | null }
 interface StockFlag { id: string; product_id: string; kind: "low" | "arrived"; note: string | null; created_at: string; resolved_at: string | null; products?: { name: string } | null; profiles?: { full_name: string | null } | null }
@@ -31,14 +32,21 @@ function InventoryInner() {
   const [adjust, setAdjust] = useState<Product | null>(null);
   const [history, setHistory] = useState<Product | null>(null);
   const [flagFor, setFlagFor] = useState<Product | null>(null);
+  const router = useRouter();
+  const staff = biz.role === "staff";
+  // Shopkeepers don't see Inventory; they use Products.
+  useEffect(() => { if (staff) router.replace("/app/products"); }, [staff, router]);
 
+  const { hasSection, costsAnywhere } = biz;
   const load = useCallback(() => {
     const sb = supabase();
-    sb.from("products").select("*, categories(name)").eq("business_id", business.id).eq("active", true).order("name").then(({ data }) => setProducts((data || []) as Product[]));
-    if (biz.costsAnywhere) sb.from("product_costs").select("product_id, avg_cost").eq("business_id", business.id).then(({ data }) => {
+    // each person only sees the inventory of their own sections (Super admin: all)
+    sb.from("products").select("*, categories(name)").eq("business_id", business.id).eq("active", true).order("name")
+      .then(({ data }) => setProducts(((data || []) as Product[]).filter((p) => hasSection(p.section_id))));
+    if (costsAnywhere) sb.from("product_costs").select("product_id, avg_cost").eq("business_id", business.id).then(({ data }) => {
       const m: Record<string, number> = {}; for (const r of (data || []) as { product_id: string; avg_cost: number }[]) m[r.product_id] = r.avg_cost; setCosts(m);
     });
-  }, [business.id, biz.costsAnywhere]);
+  }, [business.id, costsAnywhere, hasSection]);
   useEffect(load, [load]);
 
 
@@ -58,7 +66,7 @@ function InventoryInner() {
         )} />
       {tabs.length > 1 && <Tabs value={tab} onChange={setTab} items={tabs} />}
 
-      {tab === "levels" && (products === null ? <Spinner /> : (
+      {staff ? <Spinner /> : tab === "levels" && (products === null ? <Spinner /> : (
         <StockTable products={products} costs={costs} lowFirst={params.get("filter") === "low"}
           onAdjust={setAdjust} onHistory={setHistory} onFlag={setFlagFor} />
       ))}
@@ -86,7 +94,8 @@ function StockTable({ products, costs, lowFirst, onAdjust, onHistory, onFlag }: 
   onAdjust: (p: Product) => void; onHistory: (p: Product) => void; onFlag: (p: Product) => void;
 }) {
   const biz = useBiz();
-  const { business, sections } = biz;
+  const { business } = biz;
+  const sections = biz.sections.filter((s) => biz.hasSection(s.id));
   const cur = business.currency;
   const [q, setQ] = useState("");
   const [section, setSection] = useState("all");
@@ -516,37 +525,6 @@ function Flags() {
   );
 }
 
-function FlagSheet({ product, onClose, onDone }: { product: Product; onClose: () => void; onDone: () => void }) {
-  const [kind, setKind] = useState<"low" | "arrived">("low");
-  const [note, setNote] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  async function save() {
-    setBusy(true);
-    const { error } = await supabase().rpc("flag_stock", { p_product: product.id, p_kind: kind, p_note: note || null });
-    setBusy(false);
-    if (error) setErr(errorMessage(error)); else onDone();
-  }
-  return (
-    <Sheet open onClose={onClose} title={`Report: ${product.name}`} footer={<Button block size="lg" loading={busy} onClick={save}>Send report</Button>}>
-      <div className="space-y-3">
-        <div className="grid grid-cols-2 gap-2">
-          {(["low", "arrived"] as const).map((k) => (
-            <button key={k} onClick={() => setKind(k)} className={cx("rounded-xl border p-3 text-sm font-semibold", kind === k ? "border-brand bg-brand-50 text-brand-700" : "border-slate-300")}>{k === "low" ? "Running low" : "New stock arrived"}</button>
-          ))}
-        </div>
-        <Field label="Note (optional)"><Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder={kind === "arrived" ? "e.g. 2 boxes delivered by supplier" : "e.g. Only display unit left"} /></Field>
-        {err && <Alert tone="danger">{err}</Alert>}
-        <p className="text-xs text-slate-500">Staff don&apos;t change stock numbers directly. The manager will check and update the stock.</p>
-      </div>
-    </Sheet>
-  );
-}
-
 export default function InventoryPage() {
   return <Suspense><InventoryInner /></Suspense>;
-}
-
-function NotSet() {
-  return <span className="rounded bg-red-50 px-1.5 py-0.5 text-[11px] font-semibold text-red-700 ring-1 ring-red-200">Not set</span>;
 }
