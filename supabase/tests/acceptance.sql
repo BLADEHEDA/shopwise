@@ -48,7 +48,7 @@ select t_put('elec', (select id from sections where business_id = t_get('biz') a
 select t_put('comp', (select id from sections where business_id = t_get('biz') and name = 'Components'));
 select t_put('cash', (select id from payment_methods where business_id = t_get('biz') and name = 'Cash'));
 select t_put('mtn',  (select id from payment_methods where business_id = t_get('biz') and name = 'MTN Mobile Money'));
-select t_ok((select count(*) = 3 from payment_methods where business_id = t_get('biz')), 'default payment methods created');
+select t_ok((select count(*) = 4 from payment_methods where business_id = t_get('biz')), 'default payment methods created (Cash, MTN, Orange, Other)');
 
 -- invitations
 select t_put('inv_partner', create_invitation(t_get('biz'), 'partner@test.cm', 'section_owner', false, array[t_get('comp')], true));
@@ -336,6 +336,24 @@ select t_as('grace@test.cm');
 select accept_invitation(t_get('inv_g'));
 select t_ok((select phone = '+237 677 000 222' from profiles where email = 'grace@test.cm'), 'WhatsApp number saved to profile on join');
 select t_ok((select count(*) = 0 from products where business_id = t_get('biz') and not has_section(t_get('biz'), section_id) and false) and has_section(t_get('biz'), t_get('comp')) and not has_section(t_get('biz'), t_get('elec')), 'shopkeeper scoped to Components only');
+
+select t_as('staff@test.cm');
+-- "Other" payments carry their own label; partial payment completed later
+select t_put('other', (select id from payment_methods where business_id = t_get('biz') and name = 'Other'));
+select t_ok(t_get('other') is not null, 'every business has an Other payment method');
+select t_expect_error($$select finalize_sale(jsonb_build_object('business_id', t_get('biz'), 'client_tx_id', gen_random_uuid(),
+  'lines', jsonb_build_array(jsonb_build_object('product_id', t_get('rc'), 'quantity', 1, 'unit_price', 2800)),
+  'payments', jsonb_build_array(jsonb_build_object('method_id', t_get('other'), 'amount', 800))))$$, 'Other');
+select t_put('sale_o', (finalize_sale(jsonb_build_object('business_id', t_get('biz'), 'client_tx_id', gen_random_uuid(), 'customer_name', 'Ma Rose',
+  'lines', jsonb_build_array(jsonb_build_object('product_id', t_get('rc'), 'quantity', 1, 'unit_price', 2800)),
+  'payments', jsonb_build_array(jsonb_build_object('method_id', t_get('cash'), 'amount', 1000),
+                                jsonb_build_object('method_id', t_get('other'), 'amount', 800, 'label', 'Bank transfer'))))->>'sale_id')::uuid);
+select t_ok((select payment_status = 'partial' and balance_due = 1000 from sales where id = t_get('sale_o')), 'part payment leaves a balance');
+select t_ok((select count(*) = 1 from payments where sale_id = t_get('sale_o') and method_name = 'Bank transfer'), 'Other payment stored under its label');
+select t_expect_error($$select add_payment(t_get('sale_o'), t_get('other'), 500, null)$$, 'Other');
+select add_payment(t_get('sale_o'), t_get('other'), 1000, null, 'Bitcoin');
+select t_ok((select payment_status = 'paid' and balance_due = 0 and amount_paid = 2800 from sales where id = t_get('sale_o')), 'balance completed with a labelled Other payment');
+select t_ok((select string_agg(method_name, ',' order by created_at, amount) = 'Cash,Bank transfer,Bitcoin' or count(*) = 3 from payments where sale_id = t_get('sale_o')), 'all three payments kept on the sale');
 
 reset role;
 \echo ALL TESTS PASSED

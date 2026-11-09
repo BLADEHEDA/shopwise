@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search, Minus, Plus, Trash2, ShoppingCart, ChevronLeft, ShieldCheck, Hourglass, CircleX, WifiOff, Package, X } from "lucide-react";
+import { Search, Minus, Plus, Trash2, ShoppingCart, ChevronLeft, ShieldCheck, Hourglass, CircleX, WifiOff, Package, X, Check } from "lucide-react";
 import { useBiz } from "@/components/biz";
 import { useToast } from "@/components/toast";
 import { Alert, Badge, Button, Card, EmptyState, Field, Input, MoneyInput, Sheet, Spinner, Textarea } from "@/components/ui";
@@ -15,7 +15,7 @@ import type { PaymentMethod, Product } from "@/lib/types";
 
 interface Override { id: string; status: "pending" | "approved" | "rejected" | "cancelled"; approved_price: number | null; note?: string | null }
 interface Line { key: string; product: Product; qty: number; price: string; override?: Override }
-interface Pay { key: string; method_id: string; amount: string; reference: string }
+interface Pay { key: string; method_id: string; amount: string; reference: string; label: string }
 
 function lineState(l: Line): { ok: boolean; reason?: string; belowMin: boolean } {
   const p = toMinor(l.price);
@@ -145,17 +145,19 @@ export default function POS() {
   function goPay() {
     if (!allValid) { setErr("Fix the highlighted lines first."); return; }
     setErr(null);
-    if (!pays.length) {
-      const cash = methods.find((m) => m.kind === "cash") || methods[0];
-      if (cash) setPays([{ key: uuid(), method_id: cash.id, amount: minorToDecimal(total).replace(/\.00$/, ""), reference: "" }]);
-    }
+    // nothing pre-filled: the cashier enters what was actually received
     setStep("pay");
   }
 
+  // each method once; only "Other" (Bank transfer, Bitcoin…) can repeat, each with its own name
+  const isOther = (m?: PaymentMethod) => !!m && m.name === "Other";
+  const used = (m: PaymentMethod) => !isOther(m) && pays.some((p) => p.method_id === m.id);
   function addPay(m: PaymentMethod) {
-    const rest = Math.max(0, balance);
-    setPays((ps) => [...ps, { key: uuid(), method_id: m.id, amount: rest ? minorToDecimal(rest).replace(/\.00$/, "") : "", reference: "" }]);
+    if (used(m)) return;
+    setPays((ps) => [...ps, { key: uuid(), method_id: m.id, amount: "", reference: "", label: "" }]);
   }
+  const setPay = (key: string, ch: Partial<Pay>) => setPays((ps) => ps.map((x) => (x.key === key ? { ...x, ...ch } : x)));
+  const plain = (m: Minor) => minorToDecimal(m).replace(/\.00$/, "");
 
   function reset() {
     setLines([]); setPays([]); setCustomer({ name: "", phone: "", note: "" }); setStep("browse"); setTxId(uuid()); setErr(null); setQ("");
@@ -166,6 +168,7 @@ export default function POS() {
     if (!allValid) { setErr("Some cart lines need attention."); setStep("cart"); return; }
     if (paid > total) { setErr("Payments are more than the total. Enter what the customer actually paid (give change separately)."); return; }
     if (pays.some((p) => toMinor(p.amount) <= 0 || Number.isNaN(toMinor(p.amount)))) { setErr("Remove empty payment lines or enter an amount."); return; }
+    if (pays.some((p) => isOther(methods.find((m) => m.id === p.method_id)) && !p.label.trim())) { setErr('Say what each "Other" payment was (for example Bank transfer).'); return; }
     if (balance > 0 && !customer.name.trim()) { setErr("This sale has a balance due. Enter the customer's name (and phone) so you can follow up."); return; }
 
     const payload = {
@@ -176,7 +179,7 @@ export default function POS() {
       note: customer.note.trim() || null,
       sold_at: new Date().toISOString(),
       lines: lines.map((l) => ({ product_id: l.product.id, quantity: l.qty, unit_price: minorToDecimal(toMinor(l.price)), override_id: l.override?.status === "approved" ? l.override.id : null })),
-      payments: pays.map((p) => ({ method_id: p.method_id, amount: minorToDecimal(toMinor(p.amount)), reference: p.reference.trim() || null })),
+      payments: pays.map((p) => ({ method_id: p.method_id, amount: minorToDecimal(toMinor(p.amount)), reference: p.reference.trim() || null, label: p.label.trim() || null })),
     };
 
     const goOffline = async () => {
@@ -262,29 +265,53 @@ export default function POS() {
         </Card>
 
         <Card className="space-y-3 p-4">
-          <h2 className="font-semibold">Payment</h2>
+          <div>
+            <h2 className="font-semibold">How did the customer pay?</h2>
+            <p className="text-sm text-slate-500">Tap each method used and enter the amount received. Part payment is allowed.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {methods.map((m) => {
+              const on = used(m);
+              return (
+                <button key={m.id} type="button" onClick={() => addPay(m)} disabled={on} aria-pressed={on}
+                  className={cx("inline-flex h-10 items-center gap-1.5 rounded-xl border px-3 text-sm font-semibold transition",
+                    on ? "cursor-default border-emerald-300 bg-emerald-50 text-emerald-700" : "border-slate-300 bg-white text-slate-800 hover:border-brand hover:text-brand")}>
+                  {on ? <Check className="size-4" /> : <Plus className="size-4" />} {isOther(m) ? "Other (bank, crypto…)" : m.name}
+                </button>
+              );
+            })}
+          </div>
           {pays.map((p) => {
             const m = methods.find((x) => x.id === p.method_id);
+            const other = isOther(m);
+            const mine = Number.isNaN(toMinor(p.amount)) ? 0 : toMinor(p.amount);
+            const restHere = Math.max(0, balance + mine);
             return (
-              <div key={p.key} className="rounded-xl border border-slate-200 p-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">{m?.name}</span>
-                  <button onClick={() => setPays(pays.filter((x) => x.key !== p.key))} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100" aria-label={`Remove ${m?.name} payment`}><X className="size-4" /></button>
+              <div key={p.key} className="rounded-xl border border-slate-200 bg-white p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium">{other ? "Other payment" : m?.name}</span>
+                  <div className="flex items-center gap-1">
+                    {restHere > 0 && restHere !== mine && (
+                      <button type="button" onClick={() => setPay(p.key, { amount: plain(restHere) })} className="rounded-lg px-2 py-1 text-xs font-semibold text-brand hover:bg-brand-50">
+                        Rest: {fmtMinor(restHere, cur)}
+                      </button>
+                    )}
+                    <button onClick={() => setPays(pays.filter((x) => x.key !== p.key))} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100" aria-label={`Remove ${other ? p.label || "Other" : m?.name} payment`}><X className="size-4" /></button>
+                  </div>
                 </div>
+                {other && (
+                  <Input className="mt-2" placeholder="What payment? e.g. Bank transfer, Bitcoin, Card" value={p.label} aria-label="Other payment name"
+                    onChange={(e) => setPay(p.key, { label: e.target.value })} />
+                )}
                 <div className="mt-2 grid grid-cols-2 gap-2">
-                  <MoneyInput aria-label={`${m?.name} amount`} value={p.amount} onChange={(v) => setPays(pays.map((x) => (x.key === p.key ? { ...x, amount: v } : x)))} placeholder="Amount" />
+                  <MoneyInput aria-label={`${other ? "Other" : m?.name} amount`} value={p.amount} onChange={(v) => setPay(p.key, { amount: v })} placeholder="Amount received" autoFocus={!other} />
                   {m?.kind !== "cash"
-                    ? <Input placeholder="Transaction ID (optional)" value={p.reference} onChange={(e) => setPays(pays.map((x) => (x.key === p.key ? { ...x, reference: e.target.value } : x)))} />
+                    ? <Input placeholder="Transaction ID (optional)" value={p.reference} onChange={(e) => setPay(p.key, { reference: e.target.value })} />
                     : <div />}
                 </div>
               </div>
             );
           })}
-          <div className="flex flex-wrap gap-2">
-            {methods.map((m) => (
-              <Button key={m.id} variant="secondary" size="sm" onClick={() => addPay(m)}><Plus className="size-4" /> {m.name}</Button>
-            ))}
-          </div>
           <div className="space-y-1 rounded-xl bg-slate-50 p-3 text-[15px]">
             <div className="flex justify-between"><span>Total</span><span className="tabular font-semibold">{fmtMinor(total, cur)}</span></div>
             <div className="flex justify-between"><span>Paid now</span><span className="tabular font-semibold">{fmtMinor(paid, cur)}</span></div>
@@ -293,7 +320,7 @@ export default function POS() {
               <span className="tabular">{fmtMinor(Math.abs(balance), cur)}</span>
             </div>
           </div>
-          {balance > 0 && <Alert tone="warning">This will be recorded as a <b>part payment</b>. The customer owes {fmtMinor(balance, cur)}.</Alert>}
+          {balance > 0 && <Alert tone="warning">{paid > 0 ? <>This will be saved as a <b>part payment</b>.</> : <>Nothing paid yet: this will be saved as <b>unpaid</b>.</>} The customer owes {fmtMinor(balance, cur)}. Find it later under Sales → Part paid / owing to collect the rest.</Alert>}
         </Card>
 
         <Card className="space-y-3 p-4">
@@ -308,7 +335,7 @@ export default function POS() {
         {!online && <Alert tone="warning" title="You're offline">This sale will be saved on this phone and marked <b>pending</b> until it syncs.</Alert>}
         {err && <Alert tone="danger">{err}</Alert>}
         <Button size="lg" block onClick={complete} loading={busy} variant="success" className="text-lg">
-          {online ? "Complete sale" : "Save sale offline"} · {fmtMinor(total, cur)}
+          {!online ? `Save sale offline · ${fmtMinor(total, cur)}` : balance > 0 ? `Save part payment · owes ${fmtMinor(balance, cur)}` : `Complete sale · ${fmtMinor(total, cur)}`}
         </Button>
       </div>
     );

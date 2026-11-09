@@ -12,7 +12,7 @@ import { fmtMoney } from "@/lib/money";
 import { fmtDateTime, receiptLabel, todayIn } from "@/lib/format";
 import type { Sale } from "@/lib/types";
 
-type Tab = "all" | "due" | "review" | "voided" | "queue";
+type Tab = "all" | "paid" | "due" | "review" | "voided" | "queue";
 
 function SalesInner() {
   const biz = useBiz();
@@ -35,10 +35,11 @@ function SalesInner() {
     if (tab === "queue") return;
     setSales(null);
     let query = supabase().from("sales").select("*, profiles!sales_staff_user_id_fkey(full_name, email)").eq("business_id", business.id).order("sold_at", { ascending: false }).limit(300);
-    if (tab === "due") query = query.in("payment_status", ["partial", "unpaid"]).eq("status", "completed");
+    if (tab === "paid") query = query.eq("payment_status", "paid").eq("status", "completed");
+    else if (tab === "due") query = query.in("payment_status", ["partial", "unpaid"]).eq("status", "completed");
     else if (tab === "review") query = query.eq("status", "pending_review");
     else if (tab === "voided") query = query.in("status", ["voided", "rejected"]);
-    if (tab === "all" || tab === "voided") {
+    if (tab === "all" || tab === "paid" || tab === "voided") {
       // widen by a day on each side, then filter exactly by business-local date below
       const start = new Date(`${from}T00:00:00Z`);
       const end = new Date(`${to}T23:59:59Z`);
@@ -46,7 +47,7 @@ function SalesInner() {
     }
     query.then(({ data }) => {
       let rows = (data || []) as Sale[];
-      if (tab === "all" || tab === "voided") {
+      if (tab === "all" || tab === "paid" || tab === "voided") {
         rows = rows.filter((s) => { const d = todayFromIso(s.sold_at, business.timezone); return d >= from && d <= to; });
       }
       setSales(rows);
@@ -62,7 +63,8 @@ function SalesInner() {
       <PageHeader title="Sales" subtitle={biz.role === "staff" ? "Your sales" : "All sales you have access to"} actions={<Link href="/app/pos"><Button>New sale</Button></Link>} />
       <Tabs value={tab} onChange={setTab} items={[
         { value: "all", label: "All" },
-        { value: "due", label: "Balance due" },
+        { value: "paid", label: "Fully paid" },
+        { value: "due", label: "Part paid / owing" },
         { value: "review", label: "Needs review" },
         { value: "voided", label: "Voided" },
         { value: "queue", label: <>Offline queue {queue.length > 0 && <Badge tone="warning">{queue.length}</Badge>}</> },
@@ -77,7 +79,7 @@ function SalesInner() {
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
               <Input className="pl-9" placeholder="Receipt number, customer name or phone" value={q} onChange={(e) => setQ(e.target.value)} />
             </div>
-            {(tab === "all" || tab === "voided") && (
+            {(tab === "all" || tab === "paid" || tab === "voided") && (
               <>
                 <Input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} aria-label="From date" />
                 <Input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} aria-label="To date" />
@@ -93,6 +95,7 @@ function SalesInner() {
               <div className="flex justify-between border-b border-slate-100 px-4 py-2.5 text-sm text-slate-600">
                 <span>{filtered.length} sale{filtered.length === 1 ? "" : "s"}</span>
                 {tab !== "voided" && <span>Total <b className="tabular text-ink">{fmtMoney(sum, cur)}</b></span>}
+                {tab === "due" && <span>Customers owe <b className="tabular text-amber-700">{fmtMoney(filtered.reduce((t, x) => t + Number(x.balance_due), 0), cur)}</b></span>}
               </div>
               <ul className="divide-y divide-slate-100">
                 {filtered.map((x) => (

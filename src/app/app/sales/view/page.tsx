@@ -8,12 +8,12 @@ import { useBiz } from "@/components/biz";
 import { useToast } from "@/components/toast";
 import { PaymentBadge } from "@/components/badges";
 import { ReviewActions } from "@/components/review-actions";
-import { Alert, Button, Card, Field, Input, MoneyInput, Select, Sheet, Spinner, Textarea } from "@/components/ui";
+import { Alert, Button, Card, Field, Input, MoneyInput, Sheet, Spinner, Textarea } from "@/components/ui";
 import { supabase } from "@/lib/supabase";
 import { db, syncedSaleId, type QueuedSale } from "@/lib/offline";
 import { useBrand } from "@/lib/brand";
 import { fmtMoney, minorToDecimal, toMinor } from "@/lib/money";
-import { errorMessage, fmtDateTime, receiptLabel } from "@/lib/format";
+import { cx, errorMessage, fmtDateTime, receiptLabel } from "@/lib/format";
 import type { Payment, PaymentMethod, Sale, SaleLine } from "@/lib/types";
 
 function ViewInner() {
@@ -71,12 +71,12 @@ function ViewInner() {
   function receiptText(): string {
     if (!sale) return "";
     const rows = lines.map((l) => `${l.quantity} x ${l.product_name} @ ${fmtMoney(l.unit_price, cur)} = ${fmtMoney(l.line_total, cur)}`);
-    const pays = payments.map((p) => `${p.method_name}: ${fmtMoney(p.amount, cur)}`);
+    const pays = payments.map((p) => `${p.method_name} (${fmtDateTime(p.created_at, business.timezone)}): ${fmtMoney(p.amount, cur)}`);
     return [
       `${business.name} — Receipt ${receiptLabel(sale.receipt_no)}`,
       fmtDateTime(sale.sold_at, business.timezone), "", ...rows, "",
-      `TOTAL: ${fmtMoney(sale.total, cur)}`, ...pays,
-      sale.balance_due > 0 ? `BALANCE DUE: ${fmtMoney(sale.balance_due, cur)}` : "PAID IN FULL",
+      `TOTAL: ${fmtMoney(sale.total, cur)}`, ...pays, `PAID: ${fmtMoney(sale.amount_paid, cur)}`,
+      sale.balance_due > 0 ? `BALANCE DUE: ${fmtMoney(sale.balance_due, cur)} (part payment)` : "PAID IN FULL",
       "", business.receipt_footer || "", business.phone || "",
     ].filter((x) => x !== undefined).join("\n");
   }
@@ -149,7 +149,9 @@ function ViewInner() {
         <button onClick={() => router.back()} className="inline-flex items-center gap-1 text-sm font-medium text-slate-600"><ChevronLeft className="size-4" /> Back</button>
         <PaymentBadge sale={s} />
       </div>
-      {isNew && <Alert tone="success" className="no-print" title="Sale completed">Stock has been updated. Share the receipt with the customer.</Alert>}
+      {isNew && (s.balance_due > 0
+        ? <Alert tone="warning" className="no-print" title="Part payment saved">The customer still owes <b className="tabular">{fmtMoney(s.balance_due, cur)}</b>. Give them this receipt; when they come back, open this sale (Sales → Part paid / owing) and tap <b>Record payment</b>.</Alert>
+        : <Alert tone="success" className="no-print" title="Sale completed">Stock has been updated. Share the receipt with the customer.</Alert>)}
       {s.status === "pending_review" && (
         <Alert tone="warning" title="Offline sale needs owner review" className="no-print">
           <ul className="list-disc pl-4">{s.conflicts.map((c, i) => <li key={i}>{c}</li>)}</ul>
@@ -170,6 +172,7 @@ function ViewInner() {
           {business.phone && <p className="text-xs text-slate-500">{business.phone}</p>}
         </div>
         <div className="my-4 grid grid-cols-2 gap-y-1 border-y border-dashed border-slate-300 py-3 text-xs">
+          {s.balance_due > 0 && s.status === "completed" && <span className="col-span-2 mb-1 rounded bg-amber-100 py-1 text-center text-[11px] font-bold uppercase tracking-wide text-amber-900">Part payment · balance due</span>}
           <span className="text-slate-500">Receipt</span><span className="text-right font-semibold">{receiptLabel(s.receipt_no)}</span>
           <span className="text-slate-500">Date</span><span className="text-right">{fmtDateTime(s.sold_at, business.timezone)}</span>
           <span className="text-slate-500">Served by</span><span className="text-right">{s.profiles?.full_name || s.profiles?.email || "—"}</span>
@@ -185,11 +188,13 @@ function ViewInner() {
         </ul>
         <div className="mt-4 space-y-1 border-t border-dashed border-slate-300 pt-3 text-sm">
           <div className="flex justify-between text-base font-bold"><span>Total</span><span className="tabular">{fmtMoney(s.total, cur)}</span></div>
+          {payments.length > 0 && <p className="pt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Payments</p>}
           {payments.map((p) => (
-            <div key={p.id} className="flex justify-between text-slate-600">
-              <span>{p.method_name}{p.reference ? ` (${p.reference})` : ""}</span><span className="tabular whitespace-nowrap">{fmtMoney(p.amount, cur)}</span>
+            <div key={p.id} className="flex justify-between gap-2 text-slate-600">
+              <span>{p.method_name}{p.reference ? ` (${p.reference})` : ""} <span className="text-xs text-slate-400">· {fmtDateTime(p.created_at, business.timezone)}</span></span><span className="tabular whitespace-nowrap">{fmtMoney(p.amount, cur)}</span>
             </div>
           ))}
+          {payments.length > 1 && <div className="flex justify-between text-slate-700"><span>Total paid</span><span className="tabular whitespace-nowrap font-semibold">{fmtMoney(s.amount_paid, cur)}</span></div>}
           <div className={`flex justify-between border-t border-slate-200 pt-1 font-bold ${s.balance_due > 0 ? "text-amber-700" : "text-emerald-700"}`}>
             <span>{s.balance_due > 0 ? "Balance due" : "Paid in full"}</span><span className="tabular">{fmtMoney(s.balance_due > 0 ? s.balance_due : s.amount_paid, cur)}</span>
           </div>
@@ -208,7 +213,7 @@ function ViewInner() {
       )}
 
       <div className="no-print space-y-2">
-        {canCollect && <Button block variant="success" size="lg" onClick={() => setPayOpen(true)}><Plus className="size-5" /> Record payment of balance</Button>}
+        {canCollect && <Button block variant="success" size="lg" onClick={() => setPayOpen(true)}><Plus className="size-5" /> Record payment · owes {fmtMoney(s.balance_due, cur)}</Button>}
         {s.status === "pending_review" && canApproveAll && <ReviewActions sale={s} onDone={load} />}
         {s.status === "completed" && canApproveAll && <Button block variant="ghost" className="text-red-700" onClick={() => setVoidOpen(true)}><Ban className="size-4" /> Void this sale</Button>}
         {isNew && <Link href="/app/pos"><Button block size="lg" variant="secondary"><ShoppingCart className="size-5" /> Next sale</Button></Link>}
@@ -222,23 +227,43 @@ function ViewInner() {
 
 function PaymentSheet({ sale, methods, cur, onClose, onDone }: { sale: Sale; methods: PaymentMethod[]; cur: string; onClose: () => void; onDone: () => void }) {
   const [method, setMethod] = useState(methods[0]?.id || "");
-  const [amount, setAmount] = useState(String(sale.balance_due));
+  const [amount, setAmount] = useState("");
+  const [label, setLabel] = useState("");
   const [refNo, setRefNo] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const m = methods.find((x) => x.id === method);
+  const other = m?.name === "Other";
+  const left = sale.balance_due - (Number.isNaN(toMinor(amount)) ? 0 : toMinor(amount) / 100);
   async function save() {
-    setBusy(true); setErr(null);
-    const { error } = await supabase().rpc("add_payment", { p_sale: sale.id, p_method: method, p_amount: minorToDecimal(toMinor(amount)), p_reference: refNo || null });
+    setErr(null);
+    if (!(toMinor(amount) > 0)) return setErr("Enter the amount received.");
+    if (other && !label.trim()) return setErr("Say what the payment was (for example Bank transfer).");
+    setBusy(true);
+    const { error } = await supabase().rpc("add_payment", { p_sale: sale.id, p_method: method, p_amount: minorToDecimal(toMinor(amount)), p_reference: refNo || null, p_label: other ? label.trim() : null });
     setBusy(false);
     if (error) setErr(errorMessage(error)); else onDone();
   }
   return (
     <Sheet open onClose={onClose} title="Record payment" footer={<Button block size="lg" loading={busy} onClick={save}>Save payment</Button>}>
       <div className="space-y-3">
-        <p className="text-sm">Balance due: <b className="tabular">{fmtMoney(sale.balance_due, cur)}</b></p>
-        <Field label="Method"><Select value={method} onChange={(e) => setMethod(e.target.value)}>{methods.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</Select></Field>
-        <Field label="Amount"><MoneyInput value={amount} onChange={setAmount} /></Field>
-        <Field label="Transaction ID (optional)"><Input value={refNo} onChange={(e) => setRefNo(e.target.value)} /></Field>
+        <div className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">
+          Total {fmtMoney(sale.total, cur)} · paid {fmtMoney(sale.amount_paid, cur)} · <b className="tabular">owes {fmtMoney(sale.balance_due, cur)}</b>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {methods.map((x) => (
+            <button key={x.id} type="button" onClick={() => setMethod(x.id)} aria-pressed={method === x.id}
+              className={cx("h-10 rounded-xl border px-3 text-sm font-semibold", method === x.id ? "border-brand bg-brand text-white" : "border-slate-300 bg-white text-slate-800")}>
+              {x.name === "Other" ? "Other (bank, crypto…)" : x.name}
+            </button>
+          ))}
+        </div>
+        {other && <Field label="What payment?"><Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Bank transfer, Bitcoin, Card" /></Field>}
+        <Field label="Amount received" hint={<button type="button" className="font-semibold text-brand" onClick={() => setAmount(String(sale.balance_due))}>Full balance: {fmtMoney(sale.balance_due, cur)}</button>}>
+          <MoneyInput value={amount} onChange={setAmount} placeholder="Amount" />
+        </Field>
+        {m?.kind !== "cash" && <Field label="Transaction ID (optional)"><Input value={refNo} onChange={(e) => setRefNo(e.target.value)} /></Field>}
+        {amount !== "" && left >= 0 && <p className={cx("text-sm font-semibold", left > 0 ? "text-amber-700" : "text-emerald-700")}>{left > 0 ? `Still owes ${fmtMoney(left, cur)} after this` : "This completes the payment"}</p>}
         {err && <Alert tone="danger">{err}</Alert>}
       </div>
     </Sheet>
