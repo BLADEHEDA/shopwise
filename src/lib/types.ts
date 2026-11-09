@@ -21,6 +21,7 @@ export interface Business {
   address: string | null;
   receipt_footer: string | null;
   require_shift: boolean;
+  is_demo?: boolean;
 }
 
 export interface Section { id: string; business_id: string; name: string; active: boolean }

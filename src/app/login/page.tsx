@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { AuthLayout } from "@/components/auth-layout";
+import { DemoLogin } from "@/components/demo-login";
 import { Alert, Button, Field, Input, PasswordInput } from "@/components/ui";
 import { errorMessage } from "@/lib/format";
 
@@ -43,6 +44,7 @@ export default function LoginPage() {
   return (
     <AuthLayout title="Welcome back" subtitle="Sign in to your shop">
       <Suspense><LoginForm /></Suspense>
+      <DemoLogin />
     </AuthLayout>
   );
 }

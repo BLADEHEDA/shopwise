@@ -48,6 +48,24 @@ The product name is not hard-coded. It is read from the `brand_config` table, so
 
 ---
 
+## Demo shop for testers (optional)
+
+Let people try the app without signing up:
+
+1. Run `supabase/migrations/0004_demo_and_feedback.sql` (if not done yet), then in the SQL editor run:
+   ```sql
+   select demo_reset();
+   ```
+   This creates **Demo Shop (test data)**: about 19 sample products, a week of sales, an imported batch, a pending price override, a pending expense, a low-stock report and an offline sale to review. It also creates three shared logins (password `ShopwiseDemo1`):
+   - `demo.admin@example.com`: Super admin
+   - `demo.shopowner@example.com`: Shop owner (Phones & Tablets only)
+   - `demo.shopkeeper@example.com`: Shopkeeper (Accessories only)
+2. The sign-in page now shows **Try the demo** buttons: one tap, no typing.
+3. Testers send comments from **Menu → Feedback**. Platform admins read them all on the same page (with export to CSV).
+4. Demo logins can't change their email or password, and can't be disabled, so testers can't lock each other out. The demo is a separate business: testers never see real shops.
+5. **Reset** the demo to fresh data any time: *Settings → Demo shop → Reset demo data* (platform admin) or `select demo_reset();`.
+6. **Before the real launch**, remove it completely: `select demo_remove();`. The buttons disappear from the sign-in page.
+
 ## What's included (MVP / P0 + most of P1)
 
 | Area | What works |

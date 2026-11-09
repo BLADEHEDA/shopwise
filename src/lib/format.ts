@@ -91,3 +91,8 @@ export function downloadCsv(filename: string, rows: (string | number | null | un
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
+
+/** Shared demo logins (see migration 0004) */
+export function isDemoEmail(email?: string | null): boolean {
+  return !!email && /^demo\.[a-z]+@example\.com$/i.test(email);
+}

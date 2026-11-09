@@ -454,3 +454,6 @@ end $$;
 drop trigger if exists invitations_phone_to_profile on public.invitations;
 create trigger invitations_phone_to_profile after update of accepted_at on public.invitations
   for each row execute function public.invitation_phone_to_profile();
+
+-- refresh the API's function list
+notify pgrst, 'reload schema';

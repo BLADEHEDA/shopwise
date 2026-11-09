@@ -12,3 +12,6 @@ end $$;
 drop trigger if exists on_auth_user_email_changed on auth.users;
 create trigger on_auth_user_email_changed after update of email on auth.users
   for each row execute function public.handle_user_email_change();
+
+-- refresh the API's function list
+notify pgrst, 'reload schema';

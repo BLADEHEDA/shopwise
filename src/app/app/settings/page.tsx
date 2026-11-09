@@ -6,7 +6,7 @@ import { useBiz } from "@/components/biz";
 import { useToast } from "@/components/toast";
 import { Alert, Badge, Button, Card, Field, Input, PageHeader, PasswordInput, Select } from "@/components/ui";
 import { supabase } from "@/lib/supabase";
-import { errorMessage, ROLE_LABEL, uuid } from "@/lib/format";
+import { errorMessage, fmtDateTime, isDemoEmail, ROLE_LABEL, uuid } from "@/lib/format";
 import type { PaymentMethod } from "@/lib/types";
 
 export default function SettingsPage() {
@@ -57,7 +57,11 @@ export default function SettingsPage() {
         </div>
       </Card>
 
-      <LoginSecurity />
+      {isDemoEmail(biz.session.user.email) ? (
+        <Alert tone="info" title="Shared demo login">The email and password of demo accounts can&apos;t be changed, so every tester can keep using them.</Alert>
+      ) : <LoginSecurity />}
+
+      {biz.isPlatformAdmin && <DemoControls />}
 
       {isOwner && (
         <>
@@ -241,6 +245,38 @@ function LoginSecurity() {
             <Button variant="ghost" onClick={reset}>Cancel</Button>
           </div>
         </div>
+      )}
+    </Card>
+  );
+}
+
+/** Platform admin: status of the shared demo shop, and a reset button. */
+function DemoControls() {
+  const toast = useToast();
+  const [info, setInfo] = useState<{ reset_at: string | null; accounts: { email: string; label: string }[]; password: string } | null | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const load = () => { supabase().rpc("demo_info").then(({ data }) => setInfo(data || null)); };
+  useEffect(load, []);
+  async function reset() {
+    if (!confirm("Reset the demo shop? All test sales, products and changes made by testers will be replaced with fresh sample data. Real shops are not touched.")) return;
+    setBusy(true);
+    const { error } = await supabase().rpc("demo_reset_by_admin");
+    setBusy(false);
+    if (error) toast(errorMessage(error), "error"); else { toast("Demo shop reset with fresh sample data"); load(); }
+  }
+  if (info === undefined) return null;
+  return (
+    <Card className="space-y-3 p-4">
+      <h2 className="font-semibold">Demo shop for testers</h2>
+      {info ? (
+        <>
+          <p className="text-sm text-slate-600">Active. Testers tap <b>Try the demo</b> on the sign-in page. Password for all demo logins: <b>{info.password}</b>.{info.reset_at ? ` Last reset ${fmtDateTime(info.reset_at)}.` : ""}</p>
+          <ul className="text-sm text-slate-600">{info.accounts.map((a) => <li key={a.email}>• {a.label}: {a.email}</li>)}</ul>
+          <Button variant="secondary" loading={busy} onClick={reset}>Reset demo data</Button>
+          <p className="text-xs text-slate-500">To remove the demo before real launch, run <code>select demo_remove();</code> in the Supabase SQL editor.</p>
+        </>
+      ) : (
+        <p className="text-sm text-slate-600">Not set up. To create it, run <code>select demo_reset();</code> in the Supabase SQL editor.</p>
       )}
     </Card>
   );

@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  House, ShoppingCart, Receipt, Package, Boxes, Clock, Wallet, ClipboardCheck, ChartColumn, Settings, Menu, LogOut,
+  House, ShoppingCart, Receipt, Package, Boxes, Clock, Wallet, ClipboardCheck, ChartColumn, Settings, Menu, LogOut, MessageSquarePlus, FlaskConical,
 } from "lucide-react";
 import { useBiz } from "./biz";
 import { BrandMark, useBrand } from "@/lib/brand";
@@ -55,9 +55,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     { href: "/app/approvals", label: "Approvals", icon: ClipboardCheck, badge: approvals, show: biz.canApproveAny },
     { href: "/app/reports", label: biz.role === "staff" ? "My performance" : "Reports", icon: ChartColumn, show: true },
     { href: "/app/settings", label: "Settings", icon: Settings, show: true },
+    { href: `/app/feedback?from=${encodeURIComponent(path)}`, label: "Feedback", icon: MessageSquarePlus, show: true },
   ].filter((i) => i.show);
 
-  const active = (href: string) => (href === "/app" ? path === "/app" : path.startsWith(href));
+  const active = (href: string) => (href === "/app" ? path === "/app" : path.startsWith(href.split("?")[0]));
   const bottom = items.filter((i) => ["/app", "/app/pos", "/app/sales", biz.canApproveAny ? "/app/approvals" : "/app/products"].includes(i.href));
 
   useEffect(() => { document.title = `${biz.business.name} · ${brand.product_name}`; }, [biz.business.name, brand.product_name]);
@@ -103,6 +104,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <SyncIndicator businessId={biz.business.id} />
         </header>
 
+        {biz.business.is_demo && (
+          <div className="no-print flex items-center gap-2 bg-amber-100 px-4 py-2 text-sm text-amber-900">
+            <FlaskConical className="size-4 shrink-0" />
+            <span className="flex-1">Demo shop: test data shared by all testers. Try anything; it gets reset.</span>
+            <Link href={`/app/feedback?from=${encodeURIComponent(path)}`} className="shrink-0 font-semibold underline">Give feedback</Link>
+          </div>
+        )}
         <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-4 lg:px-8 lg:pb-10">{children}</main>
       </div>
 
