@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ChevronRight, Users, Palette, History, Plus, LogOut } from "lucide-react";
 import { useBiz } from "@/components/biz";
 import { useToast } from "@/components/toast";
-import { Alert, Badge, Button, Card, Field, Input, PageHeader, Select } from "@/components/ui";
+import { Alert, Badge, Button, Card, Field, Input, PageHeader, PasswordInput, Select } from "@/components/ui";
 import { supabase } from "@/lib/supabase";
 import { errorMessage, ROLE_LABEL, uuid } from "@/lib/format";
 import type { PaymentMethod } from "@/lib/types";
@@ -56,6 +56,8 @@ export default function SettingsPage() {
           <Button variant="ghost" onClick={() => supabase().auth.signOut()}><LogOut className="size-4" /> Sign out</Button>
         </div>
       </Card>
+
+      <LoginSecurity />
 
       {isOwner && (
         <>
@@ -149,5 +151,97 @@ export default function SettingsPage() {
       )}
       {!isOwner && <Alert tone="info">Business settings, team and permissions are managed by the business owner.</Alert>}
     </div>
+  );
+}
+
+/** Change login email / password. Both require the current password, so a
+ *  phone left unlocked can't be used to take over the account. */
+function LoginSecurity() {
+  const biz = useBiz();
+  const toast = useToast();
+  const email = biz.session.user.email || "";
+  const [mode, setMode] = useState<"none" | "password" | "email">("none");
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const reset = () => { setMode("none"); setCurrent(""); setNext(""); setConfirm(""); setNewEmail(""); setErr(null); };
+
+  async function verifyCurrent(): Promise<boolean> {
+    const { error } = await supabase().auth.signInWithPassword({ email, password: current });
+    if (error) { setErr("Your current password is not correct."); return false; }
+    return true;
+  }
+
+  async function savePassword() {
+    setErr(null);
+    if (next.length < 8) return setErr("The new password must have at least 8 characters.");
+    if (next !== confirm) return setErr("The two new passwords don't match.");
+    if (next === current) return setErr("Choose a password different from the current one.");
+    setBusy(true);
+    try {
+      if (!(await verifyCurrent())) return;
+      const { error } = await supabase().auth.updateUser({ password: next });
+      if (error) { setErr(errorMessage(error)); return; }
+      toast("Password changed. Use the new one next time you sign in.");
+      reset();
+    } finally { setBusy(false); }
+  }
+
+  async function saveEmail() {
+    setErr(null);
+    const e = newEmail.trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) return setErr("Enter a valid email address.");
+    if (e === email.toLowerCase()) return setErr("That is already your email.");
+    setBusy(true);
+    try {
+      if (!(await verifyCurrent())) return;
+      const { data, error } = await supabase().auth.updateUser({ email: e }, { emailRedirectTo: `${window.location.origin}/app/settings` });
+      if (error) { setErr(errorMessage(error)); return; }
+      if (data.user?.email?.toLowerCase() === e) {
+        toast(`Login email changed to ${e}`);
+        await biz.refresh();
+      } else {
+        toast(`Check ${e} (and your current inbox) and click the confirmation link to finish.`);
+      }
+      reset();
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <Card className="space-y-3 p-4">
+      <h2 className="font-semibold">Login & security</h2>
+      <p className="text-sm text-slate-600">You sign in with <b>{email}</b>. Changing your email or password always asks for your current password.</p>
+      {mode === "none" && (
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={() => setMode("password")}>Change password</Button>
+          <Button variant="secondary" onClick={() => setMode("email")}>Change login email</Button>
+        </div>
+      )}
+      {mode !== "none" && (
+        <div className="space-y-3 rounded-xl border border-slate-200 p-3">
+          {mode === "email" && (
+            <Field label="New login email" hint="e.g. a shop email like frankonic.store@gmail.com, not a personal one">
+              <Input type="email" autoComplete="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
+            </Field>
+          )}
+          {mode === "password" && (
+            <>
+              <Field label="New password" hint="At least 8 characters"><PasswordInput autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} /></Field>
+              <Field label="Repeat new password"><PasswordInput autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} /></Field>
+            </>
+          )}
+          <Field label="Current password"><PasswordInput autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} /></Field>
+          {err && <Alert tone="danger">{err}</Alert>}
+          <div className="flex gap-2">
+            <Button loading={busy} onClick={mode === "password" ? savePassword : saveEmail}>{mode === "password" ? "Save new password" : "Change email"}</Button>
+            <Button variant="ghost" onClick={reset}>Cancel</Button>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }

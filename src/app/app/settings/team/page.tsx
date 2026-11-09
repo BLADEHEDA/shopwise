@@ -13,11 +13,11 @@ interface Member extends Membership { profiles?: { full_name: string | null; ema
 interface Invite { id: string; email: string; role: Role; token: string; expires_at: string; accepted_at: string | null; revoked_at: string | null }
 
 const ROLE_HELP: Record<Role, string> = {
-  owner: "Everything: all sections, costs, reports, team and settings.",
-  section_owner: "Partner: costs, profit, stock and approvals for their own sections only.",
-  manager: "Runs operations: products, stock, staff. Financial access is optional.",
-  staff: "Sells at the POS and sees only their own sales. Never sees cost prices.",
-  accountant: "Read-only reports for the sections you choose.",
+  owner: "Full access to everything: all sections, costs, profit, team and settings. You can have several super admins (e.g. co-owners of the shop) with identical rights; each still has their own login so the app knows who did what.",
+  section_owner: "Owns one or more sections (e.g. a partner's business inside the shop). Sees stock, cost prices, profit and approvals for their own sections only.",
+  manager: "Runs day-to-day operations (products, stock, staff) for the sections you choose. Seeing costs and profit is optional.",
+  staff: "Sells at the POS in the sections you tick (e.g. section A and B, or only B). Sees only their own sales and never sees cost prices.",
+  accountant: "Can view reports for the sections you choose, but can't change anything.",
 };
 
 export default function TeamPage() {
@@ -54,11 +54,11 @@ export default function TeamPage() {
 
       {link && (
         <Alert tone="success" title="Invitation created">
-          <p>Send this link to the person. It works once, for their email only, for 7 days.</p>
+          <p>Send this link to the person (WhatsApp is easiest). They open it, type their name and choose their own password, and they&apos;re in with exactly the access you set. The link works once, only for that email, for 7 days.</p>
           <p className="mt-2 break-all rounded-lg bg-white p-2 font-mono text-xs">{link}</p>
           <div className="mt-2 flex gap-2">
             <Button size="sm" variant="secondary" onClick={() => { navigator.clipboard.writeText(link); toast("Link copied"); }}><Copy className="size-4" /> Copy</Button>
-            <Button size="sm" variant="secondary" onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(`You've been invited to join ${business.name}. Open this link to set up your account: ${link}`)}`, "_blank")}><MessageCircle className="size-4" /> WhatsApp</Button>
+            <Button size="sm" variant="secondary" onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(`You've been invited to join ${business.name}. Open this link, type your name and choose your password: ${link}`)}`, "_blank")}><MessageCircle className="size-4" /> WhatsApp</Button>
           </div>
         </Alert>
       )}
@@ -147,7 +147,7 @@ function MemberSheet({ member, onClose, onInvited, onSaved }: { member: Member |
         {!member && <Field label="Their email" hint="They must sign up with this exact email"><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>}
         <Field label="Role" hint={ROLE_HELP[role]}>
           <Select value={role} onChange={(e) => { const r = e.target.value as Role; setRole(r); if (r === "staff") setCosts(false); if (r === "section_owner") setCosts(true); }}>
-            {(["staff", "manager", "section_owner", "accountant", "owner"] as Role[]).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+            {(["staff", "section_owner", "owner", "manager", "accountant"] as Role[]).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
           </Select>
         </Field>
         {!isOwnerRole && (
@@ -168,10 +168,10 @@ function MemberSheet({ member, onClose, onInvited, onSaved }: { member: Member |
         {(role === "manager" || role === "section_owner" || role === "accountant") && (
           <label className="flex items-start gap-2 rounded-xl border border-slate-200 p-3 text-sm">
             <input type="checkbox" className="mt-0.5 size-4 accent-brand" checked={costs} onChange={(e) => setCosts(e.target.checked)} />
-            <span><b>Financial access</b>: cost prices, margins, suppliers and profit for the sections above.{role === "section_owner" && " Turn on so the partner sees their own section's profit."}</span>
+            <span><b>Financial access</b>: cost prices, margins, suppliers and profit for the sections above.{role === "section_owner" && " Turn on so the shop owner sees their own section's profit."}</span>
           </label>
         )}
-        {role === "staff" && <Alert tone="info">Sales staff can never see cost prices, suppliers or owner reports.</Alert>}
+        {role === "staff" && <Alert tone="info">Shopkeepers can never see cost prices, suppliers or profit.</Alert>}
         {member && (
           <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" className="size-4 accent-brand" checked={active} onChange={(e) => setActive(e.target.checked)} /> Access enabled</label>
         )}

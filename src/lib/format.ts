@@ -1,9 +1,9 @@
 export const ROLE_LABEL: Record<string, string> = {
-  owner: "Owner",
-  section_owner: "Section owner",
+  owner: "Super admin",
+  section_owner: "Shop owner",
   manager: "Manager",
-  staff: "Sales staff",
-  accountant: "Read-only / accountant",
+  staff: "Shopkeeper",
+  accountant: "Accountant (read-only)",
 };
 
 export function fmtDateTime(iso: string | null | undefined, tz = "Africa/Douala"): string {

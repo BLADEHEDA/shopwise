@@ -1,5 +1,5 @@
 "use client";
-import { forwardRef, useEffect, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
+import { cloneElement, forwardRef, Fragment, isValidElement, useEffect, useId, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 import { LoaderCircle, X, CircleAlert, CircleCheck, Info, Eye, EyeOff } from "lucide-react";
 import { cx } from "@/lib/format";
 
@@ -79,11 +79,26 @@ export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSel
   });
 
 export function Field({ label, hint, error, children, className }: { label: string; hint?: ReactNode; error?: string | null; children: ReactNode; className?: string }) {
+  const autoId = useId();
+  const msg = error ? <span className="mt-1 block text-sm text-red-600">{error}</span> : hint ? <span className="mt-1 block text-xs text-slate-500">{hint}</span> : null;
+  // A single control: link the label by id so extra buttons inside the
+  // control (e.g. "Show password") don't become part of its name.
+  if (isValidElement(children) && children.type !== Fragment) {
+    const props = children.props as { id?: string };
+    const id = props.id || autoId;
+    return (
+      <div className={cx("block", className)}>
+        <label htmlFor={id} className="mb-1.5 block text-sm font-medium text-slate-700">{label}</label>
+        {cloneElement(children as React.ReactElement<{ id?: string }>, { id })}
+        {msg}
+      </div>
+    );
+  }
   return (
     <label className={cx("block", className)}>
       <span className="mb-1.5 block text-sm font-medium text-slate-700">{label}</span>
       {children}
-      {error ? <span className="mt-1 block text-sm text-red-600">{error}</span> : hint ? <span className="mt-1 block text-xs text-slate-500">{hint}</span> : null}
+      {msg}
     </label>
   );
 }

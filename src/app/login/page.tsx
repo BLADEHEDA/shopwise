@@ -34,7 +34,7 @@ function LoginForm() {
         <Link href="/forgot" className="font-medium text-brand hover:underline">Forgot password?</Link>
         <Link href="/signup" className="font-medium text-brand hover:underline">Create a business</Link>
       </div>
-      <p className="pt-2 text-xs text-slate-500">Staff: ask your shop owner for an invitation link. You can&apos;t join a business without one.</p>
+      <p className="pt-2 text-xs text-slate-500">Joining a shop? Open the invitation link you received. You can&apos;t join a business without one.</p>
     </form>
   );
 }

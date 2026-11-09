@@ -13,10 +13,11 @@ The product name is not hard-coded. It is read from the `brand_config` table, so
 ### 1. Create the database (Supabase)
 
 1. Create a free project at [supabase.com](https://supabase.com) (region: *West EU* or *Frankfurt* is closest to Cameroon).
-2. Open **SQL Editor → New query**, paste the whole of [`supabase/migrations/0001_shopwise.sql`](supabase/migrations/0001_shopwise.sql) and click **Run**. This creates every table, the security rules (RLS), the transaction functions and the `shopwise` storage bucket for images.
+2. Open **SQL Editor → New query**, paste the whole of [`supabase/migrations/0001_shopwise.sql`](supabase/migrations/0001_shopwise.sql) and click **Run**. This creates every table, the security rules (RLS), the transaction functions and the `shopwise` storage bucket for images. Then do the same, in order, for every later file in `supabase/migrations/` (`0002_…`, `0003_…`). Each later file is safe to run more than once.
 3. **Authentication → URL Configuration**: set **Site URL** to your Vercel URL (e.g. `https://shopwise.vercel.app`) and add `https://shopwise.vercel.app/**` to **Redirect URLs**.
 4. *(Optional, faster onboarding)* **Authentication → Sign In / Providers → Email**: turn off **Confirm email** so new staff can sign in immediately after accepting an invite. Leave it on if you want email verification.
 5. **Project Settings → API**: copy the **Project URL** and the **anon public** key.
+6. **Before real launch: set up email (custom SMTP).** Supabase's built-in email only delivers to members of your Supabase team, and only a couple per hour. Password-reset and change-email messages to your staff need a custom SMTP provider (e.g. Brevo or Resend, both with free tiers): **Authentication → Emails → SMTP Settings**. Invitations don't need email: you send the link on WhatsApp.
 
 > ⚠️ Do **not** run `supabase/tests/acceptance.sql` on your real database. It creates test users and is only for a scratch database.
 
@@ -36,7 +37,8 @@ The product name is not hard-coded. It is read from the `brand_config` table, so
 
 1. Open the site → **Create a business** → sign up → enter *Frankonic Store* and your sections (Electronics, Components). Cash, MTN Mobile Money and Orange Money are created automatically.
 2. **Products → Import**: download the template, fill it in Excel, and upload it (preview, column matching and validation happen before anything is saved).
-3. **Settings → Team & permissions → Invite someone**: create a link and send it by WhatsApp. Invitations are single-use, tied to the email address, and expire after 7 days.
+3. **Settings → Team & permissions → Invite someone**: enter their email, pick the role (**Super admin**, **Shop owner**, **Shopkeeper**, Manager, Accountant) and tick their sections, then send the link by WhatsApp. They open it, type their name and choose their own password; that's it. Invitations are single-use, tied to that email, and expire after 7 days. Several people can be Super admin with identical rights; each has their own login, so the app always records who did what.
+   Everyone can change their own login email and password in **Settings → Login & security** (the current password is always required).
 4. Make yourself **platform administrator** (needed only for rebranding). Run this once in the SQL editor:
    ```sql
    insert into platform_admins (user_id)
