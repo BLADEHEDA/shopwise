@@ -48,6 +48,24 @@ The product name is not hard-coded. It is read from the `brand_config` table, so
 
 ---
 
+## Preparing an inventory sheet for import
+
+Any shop can upload its own Excel (.xlsx) or CSV. It works if:
+
+1. **There is a heading row** with at least a name column: `Item` / `Name` / `Product`. Optional: `Cost Price`, `Quantity`, `Selling price` / `Target price`, `Min price`, `Category`, `Section`, `Brand`, `SKU`.
+2. **One product per row.** Numbers only in number columns (`1,500` and `1500 FCFA` are fine).
+3. **Categories** can be a column, or a heading row above each block (`PHONE CHARGERS`, `Smart Watch`: any capitalisation).
+4. **Ignored automatically:** title rows above the headings, blank rows, `Total` / `Grand total` rows, an `Amount` column, and blocks whose heading contains *Expenses*.
+5. **Short names** like `2GB` or `P9` get their category added (`USB Key 2GB`): there's a switch for this on the import screen.
+6. **Same name twice** in one file is numbered (`… (2)`) and flagged so you can rename it.
+7. **Selling prices are optional**; products without one stay off the POS until a price is set.
+8. Importing the same sheet again with **Import stock** adds the quantities (no duplicates), as long as product names stay the same.
+
+To start over after importing the wrong file (removes only products never sold or purchased):
+```sql
+select remove_unsold_products('YOUR BUSINESS NAME');
+```
+
 ## Demo shop for testers (optional)
 
 Let people try the app without signing up:

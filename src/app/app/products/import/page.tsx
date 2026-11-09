@@ -25,6 +25,7 @@ function ImportInner() {
   const [map, setMap] = useState<Mapping>({});
   const [section, setSection] = useState(manageable[0]?.id || "");
   const [mode, setMode] = useState<Mode>(stockMode ? "add_stock" : "skip");
+  const [addCat, setAddCat] = useState(true);
   const [serverErrors, setServerErrors] = useState<{ row: number; message: string }[]>([]);
   const [result, setResult] = useState<Result | null>(null);
   const [busy, setBusy] = useState(false);
@@ -53,7 +54,8 @@ function ImportInner() {
     } catch (e) { setErr(`Could not read the file: ${errorMessage(e)}`); }
   }
 
-  const rows = useMemo(() => (parsed ? toImportRows(parsed, map) : []), [parsed, map]);
+  const rows = useMemo(() => (parsed ? toImportRows(parsed, map, { addCategoryToNames: addCat && (parsed.categories.length > 0 || map.category !== undefined) }) : []), [parsed, map, addCat]);
+  const renamedCount = rows.filter((r) => r.name !== r.source_name && !r._note).length;
   const sectionNames = manageable.map((s) => s.name.toLowerCase());
 
   const clientErrors = useMemo(() => {
@@ -83,12 +85,14 @@ function ImportInner() {
     value: rows.reduce((a, r) => a + toMinor(r.unit_cost || 0) * (Number(r.opening_stock) || 0), 0),
     noCost: rows.filter((r) => !r.unit_cost).length,
     noPrice: rows.filter((r) => !r.target_price).length,
+    stockNoCost: rows.filter((r) => !r.unit_cost && Number(r.opening_stock) > 0).length,
+    notes: rows.filter((r) => r._note).length,
     byCat: rows.reduce<Record<string, number>>((a, r) => { const c = r.category || "No category"; a[c] = (a[c] || 0) + 1; return a; }, {}),
   }), [rows]);
 
   async function commit() {
     setBusy(true); setErr(null); setServerErrors([]);
-    const payload = rows.map((o) => (biz.costsAnywhere ? o : { ...o, unit_cost: "" }));
+    const payload = rows.map(({ _note, source_name, ...o }) => { void _note; void source_name; return biz.costsAnywhere ? o : { ...o, unit_cost: "" }; });
     const { data, error } = await supabase().rpc("import_products", { p_business: biz.business.id, p_rows: payload, p_mode: mode, p_default_section: section || null });
     setBusy(false);
     if (error) { setErr(errorMessage(error)); return; }
@@ -149,6 +153,9 @@ function ImportInner() {
 
       {parsed && (
         <>
+          {parsed.skipped.map((sk) => (
+            <Alert key={sk.heading} tone="info" title={`Skipped "${sk.heading}" (${sk.rows} rows)`}>These look like shop expenses, not products. Record them under <Link className="font-semibold underline" href="/app/expenses">Expenses</Link> so they count in your net profit.</Alert>
+          ))}
           <Card className="space-y-3 p-4">
             <h2 className="font-semibold">1. Where should these products go?</h2>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -157,6 +164,12 @@ function ImportInner() {
                   {manageable.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </Select>
               </Field>
+              {(parsed.categories.length > 0 || map.category !== undefined) && (
+                <label className="flex items-start gap-2 rounded-xl border border-slate-200 p-3 text-sm sm:col-span-2">
+                  <input type="checkbox" className="mt-0.5 size-4 accent-brand" checked={addCat} onChange={(e) => setAddCat(e.target.checked)} />
+                  <span><b>Add the category to names that need it</b> (recommended): &quot;2GB&quot; under USB KEY becomes &quot;USB Key 2GB&quot;, &quot;P9&quot; under BLUETOOTH HEADSET becomes &quot;Bluetooth Headset P9&quot;. Clear names like &quot;Iphone USB cable&quot; stay as they are.{addCat && renamedCount ? ` ${renamedCount} names will get their category.` : ""}</span>
+                </label>
+              )}
               <Field label="If a product already exists (same name or SKU)">
                 <Select value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
                   <option value="add_stock">Add the quantity to its stock (new stock arrived)</option>
@@ -194,6 +207,12 @@ function ImportInner() {
               {biz.costsAnywhere && <div><p className="text-xs text-slate-500">Stock value at cost</p><p className="tabular font-semibold">{fmtMoney(totals.value / 100, cur)}</p><p className="text-xs text-slate-500">{totals.noCost} without cost</p></div>}
               <div><p className="text-xs text-slate-500">Without selling price</p><p className="font-semibold">{totals.noPrice}</p><p className="text-xs text-slate-500">set after import</p></div>
             </div>
+            {(totals.stockNoCost > 0 || totals.notes > 0) && (
+              <div className="space-y-1 border-b border-slate-100 px-4 py-3 text-sm text-amber-900">
+                {biz.costsAnywhere && totals.stockNoCost > 0 && <p>⚠ {totals.stockNoCost} product{totals.stockNoCost > 1 ? "s have" : " has"} stock but no cost price, so profit on {totals.stockNoCost > 1 ? "them" : "it"} can&apos;t be calculated. You can add the cost later.</p>}
+                {totals.notes > 0 && <p>⚠ {totals.notes} product{totals.notes > 1 ? "s have" : " has"} the same name as another row and will be numbered, e.g. &quot;… (2)&quot;. See the rows marked below.</p>}
+              </div>
+            )}
             <div className="max-h-[440px] overflow-auto">
               <table className="w-full text-left text-sm">
                 <thead className="sticky top-0 bg-slate-50 text-xs uppercase text-slate-500">
@@ -205,7 +224,10 @@ function ImportInner() {
                     const errs = [...clientErrors[i], ...(se ? [se.message] : [])];
                     return (
                       <tr key={i} className={cx(errs.length > 0 && "bg-red-50")}>
-                        <td className="px-3 py-2">{o.name}{o.variant_label ? ` (${o.variant_label})` : ""}<span className="block text-xs text-slate-500">{[o.brand, o.sku].filter(Boolean).join(" · ")}</span></td>
+                        <td className="px-3 py-2">{o.name}{o.variant_label ? ` (${o.variant_label})` : ""}
+                          {o.name !== o.source_name && !o._note && <span className="block text-xs text-slate-500">in sheet: {o.source_name}</span>}
+                          {o._note && <span className="block text-xs font-medium text-amber-800">{o._note}</span>}
+                          <span className="block text-xs text-slate-500">{[o.brand, o.sku].filter(Boolean).join(" · ")}</span></td>
                         <td className="px-3 py-2 text-slate-600">{o.category}</td>
                         {biz.costsAnywhere && <td className="tabular whitespace-nowrap px-3 py-2 text-right">{o.unit_cost ? fmtMoney(o.unit_cost, cur) : <span className="text-slate-400">—</span>}</td>}
                         <td className="tabular px-3 py-2 text-right">{o.opening_stock || 0}</td>

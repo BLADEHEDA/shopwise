@@ -1,7 +1,7 @@
 "use client";
 import { useRef, useState } from "react";
 import {
-  BatteryCharging, Cable, Camera, Cpu, Headphones, Laptop, LoaderCircle, Monitor, Package, PlugZap, Printer, Puzzle, Smartphone, Speaker, Watch,
+  Battery, BatteryCharging, Cable, Camera, Cpu, Fan, Gamepad2, HardDrive, Headphones, Keyboard, Laptop, Lightbulb, LoaderCircle, MemoryStick, Mic, Monitor, Mouse, Package, PlugZap, Printer, Puzzle, Router, Smartphone, Speaker, Tv, Watch,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { cx, errorMessage, uuid } from "@/lib/format";
@@ -16,6 +16,17 @@ type P = Pick<Product, "name" | "image_url"> & { categories?: { name: string } |
 function iconFor(p: P) {
   const t = `${p.categories?.name || ""} ${p.name}`.toLowerCase();
   if (/print/.test(t)) return Printer;
+  if (/usb key|flash|memory card|sd card/.test(t)) return MemoryStick;
+  if (/hard disk|hdd|ssd/.test(t)) return HardDrive;
+  if (/mouse/.test(t)) return Mouse;
+  if (/keyboard/.test(t)) return Keyboard;
+  if (/microphone|\bmic\b/.test(t)) return Mic;
+  if (/modem|router|wifi|flybox|ethernet|switch/.test(t)) return Router;
+  if (/remote|tv stand|\btv\b/.test(t)) return Tv;
+  if (/controller|gamepad|ps[2-5]/.test(t)) return Gamepad2;
+  if (/bulb|light|lamp|torch/.test(t)) return Lightbulb;
+  if (/\bfan\b/.test(t)) return Fan;
+  if (/batter/.test(t) && !/power ?bank/.test(t)) return Battery;
   if (/hdmi|vga|display|monitor/.test(t)) return Monitor;
   if (/power ?bank|battery/.test(t)) return BatteryCharging;
   if (/charg|adapter|plug|station/.test(t)) return PlugZap;
@@ -25,7 +36,7 @@ function iconFor(p: P) {
   if (/watch/.test(t)) return Watch;
   if (/laptop|computer/.test(t)) return Laptop;
   if (/phone|iphone|android/.test(t)) return Smartphone;
-  if (/cube|puzzle|toy|game/.test(t)) return Puzzle;
+  if (/cube|puzzle|toy|game|chess|jenga|klotski/.test(t)) return Puzzle;
   if (/arduino|board|chip|sensor|module|component/.test(t)) return Cpu;
   return Package;
 }

@@ -286,12 +286,12 @@ select t_ok((select count(*) from audit_log where action in ('price_override_app
 -- 15. Import v2: optional prices, name matching, add-stock, default section --
 select t_as('frank@test.cm');
 select update_member((select id from memberships where user_id = (select user_id from profiles where email = 'staff@test.cm')), 'staff', true, '{}', false, true);
-select t_ok((import_products(t_get('biz'), '[{"category":"PHONE CHARGERS","name":"Oraimo 2A android","unit_cost":"1500","opening_stock":"10"},{"category":"CABLE","name":"Laptop  cable","unit_cost":"400","opening_stock":"6"},{"category":"CABLE","name":"VGA cable 9 pins (3m)","opening_stock":"0"}]'::jsonb, 'skip', t_get('elec'))->>'inserted')::int = 3, 'import without selling prices, default section');
+select t_ok((import_products(t_get('biz'), '[{"category":"Phone Chargers","name":"Oraimo 2A android","unit_cost":"1500","opening_stock":"10"},{"category":"CABLE","name":"Laptop  cable","unit_cost":"400","opening_stock":"6"},{"category":"CABLE","name":"VGA cable 9 pins (3m)","opening_stock":"0"}]'::jsonb, 'skip', t_get('elec'))->>'inserted')::int = 3, 'import without selling prices, default section');
 select t_put('chg', (select id from products where name = 'Oraimo 2A android'));
 select t_ok((select target_price is null and min_price is null and stock_qty = 10 and section_id = t_get('elec') from products where id = t_get('chg')), 'imported product has no price yet, stock 10, in default section');
 select t_ok((select avg_cost = 1500 from product_costs where product_id = t_get('chg')), 'imported cost price stored');
 select t_ok((select name = 'Laptop cable' from products where name ilike 'laptop%cable'), 'extra spaces in names cleaned');
-select t_ok((select count(*) = 1 from categories where business_id = t_get('biz') and name = 'Phone Chargers'), 'category created from sheet heading');
+select t_ok((select count(*) = 1 from categories where business_id = t_get('biz') and name = 'Phone Chargers'), 'category created as written');
 select t_ok(not (import_products(t_get('biz'), '[{"name":"X","target_price":"100"}]'::jsonb)->>'ok')::boolean, 'row without section rejected when no default section');
 select t_ok(not (import_products(t_get('biz'), '[{"name":"Dup","target_price":"100"},{"name":"dup","target_price":"200"}]'::jsonb, 'skip', t_get('elec'))->>'ok')::boolean, 'same name twice in file rejected');
 -- re-import same names: skip
