@@ -76,7 +76,7 @@ function InventoryInner() {
 
 
 type SortKey = "category" | "name" | "amount" | "quantity";
-type Row = Product & { cost: number | null; amount: number | null; sellValue: number | null };
+type Row = Product & { cost: number | null; amount: number | null; sellValue: number | null; minValue: number | null };
 
 /** Excel-like stock table: Item | Cost price | Quantity | Amount (cost x quantity),
  *  grouped by category with subtotals, totals at the top. No images here:
@@ -93,7 +93,9 @@ function StockTable({ products, costs, lowFirst, onAdjust, onHistory, onFlag }: 
   const [category, setCategory] = useState("all");
   const [lowOnly, setLowOnly] = useState(lowFirst);
   const [sort, setSort] = useState<SortKey>("category");
-  const [showSell, setShowSell] = useState(false);
+  const [showSell, setShowSellState] = useState(true);
+  useEffect(() => { try { if (localStorage.getItem("shopwise.inv.prices") === "0") setShowSellState(false); } catch { /* private mode */ } }, []);
+  const setShowSell = (v: boolean) => { setShowSellState(v); try { localStorage.setItem("shopwise.inv.prices", v ? "1" : "0"); } catch { /* private mode */ } };
   const [menu, setMenu] = useState<Row | null>(null);
   const seeCosts = biz.costsAnywhere;
 
@@ -101,7 +103,8 @@ function StockTable({ products, costs, lowFirst, onAdjust, onHistory, onFlag }: 
     const c = biz.canViewCosts(p.section_id) ? costs[p.id] : undefined;
     const cost = c !== undefined && c > 0 ? c : null;
     return { ...p, cost, amount: cost !== null ? (toMinor(cost) * p.stock_qty) / 100 : null,
-      sellValue: p.target_price !== null ? (toMinor(p.target_price) * p.stock_qty) / 100 : null };
+      sellValue: p.target_price !== null ? (toMinor(p.target_price) * p.stock_qty) / 100 : null,
+      minValue: p.min_price !== null ? (toMinor(p.min_price) * p.stock_qty) / 100 : null };
   }), [products, costs, biz]);
 
   const categories = useMemo(() => Array.from(new Set(rows.map((r) => r.categories?.name || "No category"))).sort((a, b) => a.localeCompare(b)), [rows]);
@@ -123,6 +126,9 @@ function StockTable({ products, costs, lowFirst, onAdjust, onHistory, onFlag }: 
     qty: rs.reduce((a, r) => a + r.stock_qty, 0),
     amount: rs.reduce((a, r) => a + toMinor(r.amount ?? 0), 0) / 100,
     sell: rs.reduce((a, r) => a + toMinor(r.sellValue ?? 0), 0) / 100,
+    min: rs.reduce((a, r) => a + toMinor(r.minValue ?? 0), 0) / 100,
+    // profit only where both cost and target are known
+    profit: rs.reduce((a, r) => a + (r.amount !== null && r.sellValue !== null ? toMinor(r.sellValue) - toMinor(r.amount) : 0), 0) / 100,
     noCost: rs.filter((r) => r.cost === null && r.stock_qty > 0).length,
     noPrice: rs.filter((r) => r.target_price === null && r.stock_qty > 0).length,
     low: rs.filter((r) => r.stock_qty <= r.low_stock_threshold).length,
@@ -141,9 +147,9 @@ function StockTable({ products, costs, lowFirst, onAdjust, onHistory, onFlag }: 
   const money = (v: number | null) => (v === null ? "—" : fmtMoney(v, cur));
 
   function exportCsv() {
-    const head = ["Category", "Item", ...(seeCosts ? ["Cost price"] : []), "Quantity", ...(seeCosts ? ["Amount"] : []), ...(showSell ? ["Selling price", "Sales value"] : [])];
-    const line = (r: Row) => [r.categories?.name || "", r.name + (r.variant_label ? ` (${r.variant_label})` : ""), ...(seeCosts ? [r.cost ?? ""] : []), r.stock_qty, ...(seeCosts ? [r.amount ?? ""] : []), ...(showSell ? [r.target_price ?? "", r.sellValue ?? ""] : [])];
-    downloadCsv(`inventory-${new Date().toISOString().slice(0, 10)}.csv`, [head, ...list.map(line), [], ["TOTAL", "", ...(seeCosts ? [""] : []), total.qty, ...(seeCosts ? [total.amount] : []), ...(showSell ? ["", total.sell] : [])]]);
+    const head = ["Category", "Item", ...(seeCosts ? ["Cost price"] : []), "Quantity", ...(seeCosts ? ["Amount"] : []), ...(showSell ? ["Min price", "Target price", "Value at min", "Value at target"] : [])];
+    const line = (r: Row) => [r.categories?.name || "", r.name + (r.variant_label ? ` (${r.variant_label})` : ""), ...(seeCosts ? [r.cost ?? ""] : []), r.stock_qty, ...(seeCosts ? [r.amount ?? ""] : []), ...(showSell ? [r.min_price ?? "", r.target_price ?? "", r.minValue ?? "", r.sellValue ?? ""] : [])];
+    downloadCsv(`inventory-${new Date().toISOString().slice(0, 10)}.csv`, [head, ...list.map(line), [], ["TOTAL", "", ...(seeCosts ? [""] : []), total.qty, ...(seeCosts ? [total.amount] : []), ...(showSell ? ["", "", total.min, total.sell] : [])]]);
   }
 
   return (
@@ -163,9 +169,21 @@ function StockTable({ products, costs, lowFirst, onAdjust, onHistory, onFlag }: 
             </div>
           )}
           {showSell && (
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-emerald-800">At selling price</p>
-              <p className="tabular text-2xl font-bold text-emerald-800">{fmtMoney(total.sell, cur)}</p>
+            <div className="grid w-full grid-cols-3 gap-x-3 sm:flex sm:w-auto sm:gap-x-6">
+              <div>
+                <p className="text-[10px] font-medium uppercase tracking-wide text-amber-800 sm:text-xs">At minimum price</p>
+                <p className="tabular text-sm font-bold text-amber-800 sm:text-xl">{fmtMoney(total.min, cur)}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-800 sm:text-xs">At target price</p>
+                <p className="tabular text-sm font-bold text-emerald-800 sm:text-xl">{fmtMoney(total.sell, cur)}</p>
+              </div>
+              {seeCosts && (
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-slate-600 sm:text-xs">Profit at target</p>
+                  <p className="tabular text-sm font-bold text-slate-800 sm:text-xl">{fmtMoney(total.profit, cur)}</p>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -175,7 +193,7 @@ function StockTable({ products, costs, lowFirst, onAdjust, onHistory, onFlag }: 
           <span><b>{new Set(list.map((r) => r.categories?.name || "")).size}</b> categories</span>
           {total.low > 0 && <button onClick={() => setLowOnly(!lowOnly)} className="font-semibold text-amber-800 underline">{total.low} low / out{lowOnly ? " (showing)" : ""}</button>}
           {seeCosts && total.noCost > 0 && <span className="text-amber-800">{total.noCost} without cost</span>}
-          {showSell && total.noPrice > 0 && <span className="text-amber-800">{total.noPrice} without selling price</span>}
+          {showSell && total.noPrice > 0 && <span className="font-semibold text-red-700">{total.noPrice} without selling price (not counted)</span>}
         </p>
       </Card>
 
@@ -207,7 +225,7 @@ function StockTable({ products, costs, lowFirst, onAdjust, onHistory, onFlag }: 
           )}
           <button onClick={() => setShowSell(!showSell)} aria-pressed={showSell}
             className={cx("h-11 rounded-xl border px-3 text-sm font-medium", showSell ? "border-emerald-600 bg-emerald-50 text-emerald-800" : "border-slate-300 bg-white text-slate-700")}>
-            {showSell ? "✓ Selling prices" : "Show selling prices"}
+            {showSell ? "✓ Min & target prices" : "Show min & target prices"}
           </button>
           {lowOnly && <button onClick={() => setLowOnly(false)} className="h-11 rounded-xl bg-amber-100 px-3 text-sm font-medium text-amber-900">Low stock only ✕</button>}
         </div>
@@ -217,16 +235,17 @@ function StockTable({ products, costs, lowFirst, onAdjust, onHistory, onFlag }: 
         <Card><EmptyState icon={<Boxes className="size-6" />} title={rows.length ? "Nothing matches" : "No stock yet"} action={!rows.length && biz.canManageAny ? <Link href="/app/products/import?mode=stock"><Button>Import stock</Button></Link> : undefined}>{rows.length ? "Try another search or filter." : "Import your stock list to see it here."}</EmptyState></Card>
       ) : (
         <Card className="overflow-hidden">
+          {showSell && <p className="border-b border-slate-100 px-3 py-1.5 text-xs text-slate-500 sm:hidden">Swipe the table left to see Min and Target prices →</p>}
           <div className="max-h-[75vh] overflow-auto">
             <table className="w-full border-collapse text-[13px] sm:text-sm">
               <thead className="sticky top-0 z-10 bg-slate-800 text-left text-xs font-semibold uppercase tracking-wide text-white">
                 <tr>
-                  <th className="px-2 py-2.5 sm:px-3">Item</th>
+                  <th className="sticky left-0 z-[1] bg-slate-800 px-2 py-2.5 sm:px-3">Item</th>
                   {seeCosts && <th className="px-2 py-2.5 sm:px-3 text-right"><span className="sm:hidden">Cost</span><span className="hidden sm:inline">Cost price</span></th>}
                   <th className="px-2 py-2.5 sm:px-3 text-right">Qty</th>
                   {seeCosts && <th className="px-2 py-2.5 sm:px-3 text-right">Amount</th>}
-                  {showSell && <th className="px-2 py-2.5 sm:px-3 text-right">Sell price</th>}
-                  {showSell && <th className="px-2 py-2.5 sm:px-3 text-right">Sales value</th>}
+                  {showSell && <th className="px-2 py-2.5 sm:px-3 text-right text-amber-200">Min price</th>}
+                  {showSell && <th className="px-2 py-2.5 sm:px-3 text-right text-emerald-200">Target price</th>}
                   <th className="hidden w-8 px-1 py-2.5 sm:table-cell" aria-label="Actions" />
                 </tr>
               </thead>
@@ -243,8 +262,8 @@ function StockTable({ products, costs, lowFirst, onAdjust, onHistory, onFlag }: 
                       {g.rows.map((r, i) => {
                         const low = r.stock_qty <= r.low_stock_threshold;
                         return (
-                          <tr key={r.id} onClick={() => setMenu(r)} className={cx("cursor-pointer border-t border-slate-100 hover:bg-slate-50", i % 2 === 1 && "bg-slate-50/50")}>
-                            <td className="px-2 py-2 [overflow-wrap:anywhere] sm:px-3">
+                          <tr key={r.id} onClick={() => setMenu(r)} className={cx("cursor-pointer border-t border-slate-100 hover:bg-brand-50", i % 2 === 1 ? "bg-slate-50" : "bg-white")}>
+                            <td className={cx("sticky left-0 bg-inherit px-2 py-2 [overflow-wrap:anywhere] sm:px-3", showSell && "min-w-[8.5rem]")}>
                               <span className="font-medium">{r.name}</span>{r.variant_label ? <span className="text-slate-500"> ({r.variant_label})</span> : null}
                               {sort !== "category" && r.categories?.name && <span className="block text-xs text-slate-500">{r.categories.name}</span>}
                             </td>
@@ -254,20 +273,20 @@ function StockTable({ products, costs, lowFirst, onAdjust, onHistory, onFlag }: 
                               {low && <span className={cx("block text-[10px] leading-none sm:ml-1 sm:inline font-semibold uppercase", r.stock_qty === 0 ? "text-red-600" : "text-amber-700")}>{r.stock_qty === 0 ? "out" : "low"}</span>}
                             </td>
                             {seeCosts && <td className={cx("tabular whitespace-nowrap px-2 py-2 sm:px-3 text-right font-semibold", r.amount === null && "font-normal text-slate-400")}>{r.amount === null ? "—" : fmtNumber(r.amount)}</td>}
-                            {showSell && <td className="tabular whitespace-nowrap px-2 py-2 sm:px-3 text-right">{r.target_price === null ? <span className="text-slate-400">—</span> : fmtNumber(r.target_price)}</td>}
-                            {showSell && <td className="tabular whitespace-nowrap px-2 py-2 sm:px-3 text-right">{r.sellValue === null ? <span className="text-slate-400">—</span> : fmtNumber(r.sellValue)}</td>}
+                            {showSell && <td className="tabular whitespace-nowrap px-2 py-2 sm:px-3 text-right text-amber-800">{r.min_price === null ? <NotSet /> : fmtNumber(r.min_price)}</td>}
+                            {showSell && <td className="tabular whitespace-nowrap px-2 py-2 sm:px-3 text-right font-medium text-emerald-800">{r.target_price === null ? <NotSet /> : fmtNumber(r.target_price)}</td>}
                             <td className="hidden px-1 py-2 text-slate-400 sm:table-cell"><MoreVertical className="size-4" /></td>
                           </tr>
                         );
                       })}
                       {g.name && (
                         <tr className="border-t border-slate-300 bg-slate-100 text-xs font-semibold text-slate-700">
-                          <td className="px-2 py-1.5 sm:px-3">Subtotal · {g.rows.length} item{g.rows.length === 1 ? "" : "s"}</td>
+                          <td className="sticky left-0 bg-slate-100 px-2 py-1.5 sm:px-3">Subtotal · {g.rows.length} item{g.rows.length === 1 ? "" : "s"}</td>
                           {seeCosts && <td />}
                           <td className="tabular px-2 py-1.5 sm:px-3 text-right">{st.qty}</td>
                           {seeCosts && <td className="tabular whitespace-nowrap px-2 py-1.5 sm:px-3 text-right">{fmtNumber(st.amount)}</td>}
-                          {showSell && <td />}
-                          {showSell && <td className="tabular whitespace-nowrap px-2 py-1.5 sm:px-3 text-right">{fmtNumber(st.sell)}</td>}
+                          {showSell && <td className="tabular whitespace-nowrap px-2 py-1.5 sm:px-3 text-right text-amber-800">{fmtNumber(st.min)}</td>}
+                          {showSell && <td className="tabular whitespace-nowrap px-2 py-1.5 sm:px-3 text-right text-emerald-800">{fmtNumber(st.sell)}</td>}
                           <td className="hidden sm:table-cell" />
                         </tr>
                       )}
@@ -277,12 +296,12 @@ function StockTable({ products, costs, lowFirst, onAdjust, onHistory, onFlag }: 
               </tbody>
               <tfoot className="sticky bottom-0 bg-slate-800 text-sm font-bold text-white">
                 <tr>
-                  <td className="px-2 py-2.5 sm:px-3">TOTAL<span className="hidden sm:inline"> · {list.length} items</span></td>
+                  <td className="sticky left-0 bg-slate-800 px-2 py-2.5 sm:px-3">TOTAL<span className="hidden sm:inline"> · {list.length} items</span></td>
                   {seeCosts && <td />}
                   <td className="tabular px-2 py-2.5 sm:px-3 text-right">{total.qty.toLocaleString("en-US")}</td>
                   {seeCosts && <td className="tabular whitespace-nowrap px-2 py-2.5 sm:px-3 text-right">{fmtNumber(total.amount)}</td>}
-                  {showSell && <td />}
-                  {showSell && <td className="tabular whitespace-nowrap px-2 py-2.5 sm:px-3 text-right">{fmtNumber(total.sell)}</td>}
+                  {showSell && <td className="tabular whitespace-nowrap px-2 py-2.5 sm:px-3 text-right text-amber-200">{fmtNumber(total.min)}</td>}
+                  {showSell && <td className="tabular whitespace-nowrap px-2 py-2.5 sm:px-3 text-right text-emerald-200">{fmtNumber(total.sell)}</td>}
                   <td className="hidden sm:table-cell" />
                 </tr>
               </tfoot>
@@ -291,7 +310,7 @@ function StockTable({ products, costs, lowFirst, onAdjust, onHistory, onFlag }: 
         </Card>
       )}
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-        <span>{seeCosts ? "Amount = cost price × quantity (weighted average cost, includes freight from purchases). " : ""}Tap a row to adjust stock or see its history.</span>
+        <span>{seeCosts ? "Amount = cost price × quantity. " : ""}{showSell ? "In subtotal and total rows, Min and Target show the stock value at that price (price × quantity). " : ""}Tap a row to adjust stock, see its history or set prices.</span>
         {list.length > 0 && biz.canReport && <Button variant="ghost" size="sm" onClick={exportCsv}><Download className="size-4" /> Export CSV</Button>}
       </div>
 
@@ -526,4 +545,8 @@ function FlagSheet({ product, onClose, onDone }: { product: Product; onClose: ()
 
 export default function InventoryPage() {
   return <Suspense><InventoryInner /></Suspense>;
+}
+
+function NotSet() {
+  return <span className="rounded bg-red-50 px-1.5 py-0.5 text-[11px] font-semibold text-red-700 ring-1 ring-red-200">Not set</span>;
 }
