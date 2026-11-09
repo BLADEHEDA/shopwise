@@ -12,6 +12,14 @@ import type { Membership, Role } from "@/lib/types";
 interface Member extends Membership { profiles?: { full_name: string | null; email: string | null; phone: string | null } | null }
 interface Invite { id: string; email: string; role: Role; token: string; expires_at: string; accepted_at: string | null; revoked_at: string | null }
 
+/** wa.me needs the full international number without + or spaces.
+ *  Cameroon numbers are 9 digits starting with 6/2; add 237 for those. */
+function waNumber(phone: string): string {
+  const d = phone.replace(/\D/g, "");
+  if (!d) return "";
+  return d.length === 9 && /^[62]/.test(d) ? `237${d}` : d;
+}
+
 const ROLE_HELP: Record<Role, string> = {
   owner: "Full access to everything: all sections, costs, profit, team and settings. You can have several super admins (e.g. co-owners of the shop) with identical rights; each still has their own login so the app knows who did what.",
   section_owner: "Owns one or more sections (e.g. a partner's business inside the shop). Sees stock, cost prices, profit and approvals for their own sections only.",
@@ -28,6 +36,7 @@ export default function TeamPage() {
   const [invites, setInvites] = useState<Invite[]>([]);
   const [editing, setEditing] = useState<Member | "new" | null>(null);
   const [link, setLink] = useState<string | null>(null);
+  const [linkPhone, setLinkPhone] = useState("");
 
   const load = useCallback(async () => {
     const sb = supabase();
@@ -58,7 +67,7 @@ export default function TeamPage() {
           <p className="mt-2 break-all rounded-lg bg-white p-2 font-mono text-xs">{link}</p>
           <div className="mt-2 flex gap-2">
             <Button size="sm" variant="secondary" onClick={() => { navigator.clipboard.writeText(link); toast("Link copied"); }}><Copy className="size-4" /> Copy</Button>
-            <Button size="sm" variant="secondary" onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(`You've been invited to join ${business.name}. Open this link, type your name and choose your password: ${link}`)}`, "_blank")}><MessageCircle className="size-4" /> WhatsApp</Button>
+            <Button size="sm" variant="secondary" onClick={() => window.open(`https://wa.me/${waNumber(linkPhone)}?text=${encodeURIComponent(`You've been invited to join ${business.name}. Open this link, type your name and choose your password: ${link}`)}`, "_blank")}><MessageCircle className="size-4" /> {linkPhone ? `Send on WhatsApp to ${linkPhone}` : "WhatsApp"}</Button>
           </div>
         </Alert>
       )}
@@ -108,14 +117,15 @@ export default function TeamPage() {
       </Card>
 
       {editing && <MemberSheet member={editing === "new" ? null : editing} onClose={() => setEditing(null)}
-        onInvited={(t) => { setEditing(null); setLink(inviteUrl(t)); load(); }} onSaved={() => { setEditing(null); load(); toast("Permissions updated"); }} />}
+        onInvited={(t, ph) => { setEditing(null); setLink(inviteUrl(t)); setLinkPhone(ph); load(); }} onSaved={() => { setEditing(null); load(); toast("Permissions updated"); }} />}
     </div>
   );
 }
 
-function MemberSheet({ member, onClose, onInvited, onSaved }: { member: Member | null; onClose: () => void; onInvited: (token: string) => void; onSaved: () => void }) {
+function MemberSheet({ member, onClose, onInvited, onSaved }: { member: Member | null; onClose: () => void; onInvited: (token: string, phone: string) => void; onSaved: () => void }) {
   const { business, sections } = useBiz();
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [role, setRole] = useState<Role>(member?.role || "staff");
   const [all, setAll] = useState(member?.all_sections ?? false);
   const [secs, setSecs] = useState<string[]>(member?.section_ids || []);
@@ -130,9 +140,9 @@ function MemberSheet({ member, onClose, onInvited, onSaved }: { member: Member |
     if (!isOwnerRole && !all && secs.length === 0) return setErr("Choose at least one section, or All sections.");
     setBusy(true);
     if (!member) {
-      const { data, error } = await supabase().rpc("create_invitation", { p_business: business.id, p_email: email, p_role: role, p_all_sections: all, p_section_ids: secs, p_can_view_costs: costs });
+      const { data, error } = await supabase().rpc("create_invitation", { p_business: business.id, p_email: email, p_role: role, p_all_sections: all, p_section_ids: secs, p_can_view_costs: costs, p_phone: phone.trim() || null });
       setBusy(false);
-      if (error) setErr(errorMessage(error)); else onInvited(data as string);
+      if (error) setErr(errorMessage(error)); else onInvited(data as string, phone.trim());
     } else {
       const { error } = await supabase().rpc("update_member", { p_membership: member.id, p_role: role, p_all_sections: all, p_section_ids: secs, p_can_view_costs: costs, p_active: active });
       setBusy(false);
@@ -144,7 +154,12 @@ function MemberSheet({ member, onClose, onInvited, onSaved }: { member: Member |
     <Sheet open onClose={onClose} title={member ? `Edit ${member.profiles?.full_name || member.profiles?.email}` : "Invite someone"}
       footer={<Button block size="lg" loading={busy} onClick={save}>{member ? "Save permissions" : "Create invitation link"}</Button>}>
       <div className="space-y-4">
-        {!member && <Field label="Their email" hint="They must sign up with this exact email"><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>}
+        {!member && (
+          <>
+            <Field label="Their email" hint="They will sign in with this email"><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+            <Field label="Their WhatsApp number (optional)" hint="To send them the link directly. Saved on their profile."><Input inputMode="tel" placeholder="6XX XXX XXX" value={phone} onChange={(e) => setPhone(e.target.value)} /></Field>
+          </>
+        )}
         <Field label="Role" hint={ROLE_HELP[role]}>
           <Select value={role} onChange={(e) => { const r = e.target.value as Role; setRole(r); if (r === "staff") setCosts(false); if (r === "section_owner") setCosts(true); }}>
             {(["staff", "section_owner", "owner", "manager", "accountant"] as Role[]).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}

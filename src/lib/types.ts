@@ -54,8 +54,8 @@ export interface Product {
   description: string | null;
   specs: Record<string, string>;
   image_url: string | null;
-  target_price: number;
-  min_price: number;
+  target_price: number | null; // null = "Needs price" (imported with cost only)
+  min_price: number | null;
   stock_qty: number;
   low_stock_threshold: number;
   active: boolean;

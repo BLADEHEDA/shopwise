@@ -6,6 +6,7 @@ import { useBiz } from "@/components/biz";
 import { useToast } from "@/components/toast";
 import { Alert, Badge, Button, Card, EmptyState, Field, Input, MoneyInput, Sheet, Spinner, Textarea } from "@/components/ui";
 import { ShiftCard } from "@/components/shift-card";
+import { ProductThumb } from "@/components/product-photo";
 import { supabase } from "@/lib/supabase";
 import { cacheCatalogue, cachedCatalogue, db, queueSale } from "@/lib/offline";
 import { fmtMinor, fmtMoney, minorToDecimal, toMinor, type Minor } from "@/lib/money";
@@ -75,7 +76,10 @@ export default function POS() {
   }, [business.id]);
   useEffect(() => { load(); }, [load, online]);
 
-  const sellable = useMemo(() => (products || []).filter((p) => biz.hasSection(p.section_id)), [products, biz]);
+  const mine = useMemo(() => (products || []).filter((p) => biz.hasSection(p.section_id)), [products, biz]);
+  // products imported without a selling price can't be sold until a price is set
+  const sellable = useMemo(() => mine.filter((p) => p.target_price !== null && p.min_price !== null), [mine]);
+  const unpriced = mine.length - sellable.length;
   const visible = useMemo(() => {
     const s = q.trim().toLowerCase();
     return sellable.filter((p) => (section === "all" || p.section_id === section) && (!s ||
@@ -343,6 +347,12 @@ export default function POS() {
           )}
         </div>
 
+        {unpriced > 0 && (
+          <Alert tone="info" className="mb-3">
+            {unpriced} product{unpriced > 1 ? "s" : ""} {unpriced > 1 ? "are" : "is"} hidden because {unpriced > 1 ? "they have" : "it has"} no selling price yet.
+            {biz.canManageAny ? <> <button className="font-semibold underline" onClick={() => router.push("/app/products?filter=needs_price")}>Set prices</button></> : " Ask the owner to set the prices."}
+          </Alert>
+        )}
         {sellable.length === 0 ? (
           <EmptyState icon={<Package className="size-6" />} title="No products to sell yet"
             action={biz.canManageAny ? <Button onClick={() => router.push("/app/products/import")}>Import products</Button> : undefined}>
@@ -360,10 +370,7 @@ export default function POS() {
                   className={cx("group relative flex flex-col overflow-hidden rounded-2xl border bg-white text-left transition active:scale-[0.98] disabled:opacity-50",
                     inCart ? "border-brand ring-2 ring-brand-200" : "border-slate-200 hover:border-brand-300")}>
                   <div className={cx("w-full bg-slate-100", p.image_url ? "aspect-[4/3]" : "aspect-[5/2]")}>
-                    {p.image_url
-                      // eslint-disable-next-line @next/next/no-img-element
-                      ? <img src={p.image_url} alt="" loading="lazy" className="size-full object-cover" />
-                      : <div className="grid size-full place-items-center bg-brand-50 text-3xl font-bold text-brand-300">{p.name.charAt(0)}</div>}
+                    <ProductThumb product={p} iconClass="size-8" />
                   </div>
                   <div className="flex flex-1 flex-col p-2.5">
                     <p className="line-clamp-2 text-sm font-semibold leading-tight">{p.name}</p>

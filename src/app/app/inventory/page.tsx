@@ -2,9 +2,10 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Boxes, Search, History, SlidersHorizontal, Flag, Truck, Check } from "lucide-react";
+import { Boxes, Search, History, SlidersHorizontal, Flag, Truck, Check, Upload } from "lucide-react";
 import { useBiz } from "@/components/biz";
 import { useToast } from "@/components/toast";
+import { ProductThumb } from "@/components/product-photo";
 import { Alert, Badge, Button, Card, EmptyState, Field, Input, MoneyInput, PageHeader, Select, Sheet, Spinner, Stat, Tabs, Textarea } from "@/components/ui";
 import { supabase } from "@/lib/supabase";
 import { fmtMoney, minorToDecimal, toMinor } from "@/lib/money";
@@ -37,7 +38,7 @@ function InventoryInner() {
 
   const load = useCallback(() => {
     const sb = supabase();
-    sb.from("products").select("*").eq("business_id", business.id).eq("active", true).order("name").then(({ data }) => setProducts((data || []) as Product[]));
+    sb.from("products").select("*, categories(name)").eq("business_id", business.id).eq("active", true).order("name").then(({ data }) => setProducts((data || []) as Product[]));
     if (biz.costsAnywhere) sb.from("product_costs").select("product_id, avg_cost").eq("business_id", business.id).then(({ data }) => {
       const m: Record<string, number> = {}; for (const r of (data || []) as { product_id: string; avg_cost: number }[]) m[r.product_id] = r.avg_cost; setCosts(m);
     });
@@ -64,7 +65,12 @@ function InventoryInner() {
   return (
     <div>
       <PageHeader title="Inventory" subtitle={biz.canManageAny ? "Stock levels, adjustments and history" : "Check stock and report low or arrived items"}
-        actions={biz.canManageAny && biz.costsAnywhere && <Link href="/app/inventory/receive"><Button><Truck className="size-4" /> Receive stock</Button></Link>} />
+        actions={biz.canManageAny && (
+          <>
+            <Link href="/app/products/import?mode=stock"><Button variant="secondary"><Upload className="size-4" /> Import stock</Button></Link>
+            {biz.costsAnywhere && <Link href="/app/inventory/receive"><Button><Truck className="size-4" /> Receive stock</Button></Link>}
+          </>
+        )} />
       {tabs.length > 1 && <Tabs value={tab} onChange={setTab} items={tabs} />}
 
       {tab === "levels" && (
@@ -99,6 +105,7 @@ function InventoryInner() {
                   const manage = biz.canManage(p.section_id);
                   return (
                     <li key={p.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                      <div className="size-10 shrink-0 overflow-hidden rounded-lg"><ProductThumb product={p} iconClass="size-5" /></div>
                       <div className="min-w-0 flex-1">
                         <p className="truncate font-medium">{p.name}{p.variant_label ? ` (${p.variant_label})` : ""}</p>
                         <p className="text-xs text-slate-500">{secName(p.section_id)} · alert at {p.low_stock_threshold}{biz.canViewCosts(p.section_id) && costs[p.id] !== undefined ? ` · cost ${fmtMoney(costs[p.id], cur)}` : ""}</p>

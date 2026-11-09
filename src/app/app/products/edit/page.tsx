@@ -7,6 +7,7 @@ import { useToast } from "@/components/toast";
 import { Alert, Button, Card, Field, Input, MoneyInput, PageHeader, Select, Spinner, Textarea } from "@/components/ui";
 import { supabase } from "@/lib/supabase";
 import { minorToDecimal, toMinor, fmtMoney } from "@/lib/money";
+import { shrinkImage, ProductThumb } from "@/components/product-photo";
 import { errorMessage, uuid } from "@/lib/format";
 import type { Product } from "@/lib/types";
 
@@ -53,7 +54,7 @@ function EditInner() {
         section_id: p.section_id, category: p.categories?.name || "", name: p.name, brand: p.brand || "", model: p.model || "", sku: p.sku || "",
         barcode: p.barcode || "", parent_id: p.parent_id || "", variant_label: p.variant_label || "", description: p.description || "",
         specs: Object.entries(p.specs || {}).map(([k, v]) => `${k}: ${v}`).join("\n"), image_url: p.image_url || "",
-        target_price: String(p.target_price), min_price: String(p.min_price), low_stock_threshold: String(p.low_stock_threshold), active: p.active,
+        target_price: p.target_price === null ? "" : String(p.target_price), min_price: p.min_price === null ? "" : String(p.min_price), low_stock_threshold: String(p.low_stock_threshold), active: p.active,
         cost: c.data ? String((c.data as { avg_cost: number }).avg_cost) : "", opening_stock: "",
       });
     })();
@@ -64,14 +65,14 @@ function EditInner() {
   if (!f) return <Spinner />;
   const set = (patch: Partial<Form>) => setF({ ...f, ...patch });
   const canCost = biz.canViewCosts(f.section_id);
+  const hasPrice = f.target_price.trim() !== "";
   const target = toMinor(f.target_price), min = toMinor(f.min_price || f.target_price);
 
   async function upload(file: File) {
-    if (file.size > 3 * 1024 * 1024) { toast("Image must be under 3 MB", "error"); return; }
     setUploading(true);
-    const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
-    const path = `${business.id}/products/${uuid()}.${ext}`;
-    const { error } = await supabase().storage.from("shopwise").upload(path, file, { upsert: false, contentType: file.type });
+    const blob = await shrinkImage(file);
+    const path = `${business.id}/products/${uuid()}.jpg`;
+    const { error } = await supabase().storage.from("shopwise").upload(path, blob, { upsert: false, contentType: "image/jpeg" });
     setUploading(false);
     if (error) { toast(errorMessage(error), "error"); return; }
     set({ image_url: supabase().storage.from("shopwise").getPublicUrl(path).data.publicUrl });
@@ -82,8 +83,9 @@ function EditInner() {
     if (!f) return;
     setErr(null);
     if (!f.name.trim()) return setErr("Name is required.");
-    if (!(target > 0)) return setErr("Enter a target selling price.");
-    if (!(min > 0) || min > target) return setErr("Minimum price must be more than 0 and not above the target price.");
+    if (!hasPrice && f.min_price.trim()) return setErr("Enter the target selling price too, or clear the minimum price.");
+    if (hasPrice && !(target > 0)) return setErr("The target selling price must be more than 0.");
+    if (hasPrice && (!(min > 0) || min > target)) return setErr("Minimum price must be more than 0 and not above the target price.");
     setBusy(true);
     const sb = supabase();
     try {
@@ -106,7 +108,7 @@ function EditInner() {
         section_id: f.section_id, category_id, name: f.name.trim(), brand: f.brand.trim() || null, model: f.model.trim() || null,
         sku: f.sku.trim() || null, barcode: f.barcode.trim() || null, parent_id: f.parent_id || null, variant_label: f.variant_label.trim() || null,
         description: f.description.trim() || null, specs, image_url: f.image_url || null,
-        target_price: minorToDecimal(target), min_price: minorToDecimal(min), low_stock_threshold: parseInt(f.low_stock_threshold || "0", 10) || 0, active: f.active,
+        target_price: hasPrice ? minorToDecimal(target) : null, min_price: hasPrice ? minorToDecimal(min) : null, low_stock_threshold: parseInt(f.low_stock_threshold || "0", 10) || 0, active: f.active,
       };
       let pid = id;
       if (id) {
@@ -146,7 +148,7 @@ function EditInner() {
             {f.image_url
               // eslint-disable-next-line @next/next/no-img-element
               ? <img src={f.image_url} alt="" className="size-full object-cover" />
-              : <span className="flex flex-col items-center text-xs"><ImagePlus className="mb-1 size-6" />{uploading ? "Uploading…" : "Photo"}</span>}
+              : <span className="relative size-full"><ProductThumb product={{ name: f.name || "?", image_url: null, categories: { name: f.category } }} /><span className="absolute inset-x-0 bottom-1 flex items-center justify-center gap-1 text-[11px] font-semibold text-brand-700"><ImagePlus className="size-3.5" />{uploading ? "Uploading…" : "Add photo"}</span></span>}
             <input type="file" accept="image/*" capture="environment" className="sr-only" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
           </label>
           <div className="flex-1 space-y-3">
@@ -182,8 +184,9 @@ function EditInner() {
 
       <Card className="space-y-3 p-4">
         <h2 className="font-semibold">Prices</h2>
+        {!hasPrice && <Alert tone="warning">No selling price yet: this product won&apos;t appear at the POS until you set one.</Alert>}
         <div className="grid gap-3 sm:grid-cols-3">
-          <Field label="Target selling price" hint="Staff start here"><MoneyInput required value={f.target_price} onChange={(v) => set({ target_price: v })} /></Field>
+          <Field label="Target selling price" hint="Staff start here"><MoneyInput value={f.target_price} onChange={(v) => set({ target_price: v })} placeholder="Not set" /></Field>
           <Field label="Minimum price" hint="Lowest staff can go without approval"><MoneyInput value={f.min_price} onChange={(v) => set({ min_price: v })} placeholder={f.target_price} /></Field>
           {canCost && <Field label="Cost price (owner only)" hint={origCost !== null ? `Current avg. landed cost ${fmtMoney(origCost, business.currency)}` : "Never shown to staff"}><MoneyInput value={f.cost} onChange={(v) => set({ cost: v })} /></Field>}
         </div>

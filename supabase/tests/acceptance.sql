@@ -67,7 +67,7 @@ select t_as('manager@test.cm');  select accept_invitation(t_get('inv_mgr'));
 
 -- staff cannot invite people
 select t_as('staff@test.cm');
-select t_expect_error($$select create_invitation(t_get('biz'), 'x@test.cm', 'owner', true, '{}', true)$$, 'Only a business owner');
+select t_expect_error($$select create_invitation(t_get('biz'), 'x@test.cm', 'owner', true, '{}', true)$$, 'Only a super admin');
 
 -- 2. Catalogue & stock -----------------------------------------------------
 select t_as('frank@test.cm');
@@ -281,6 +281,61 @@ select update_brand('Shopwise', 'Sell smarter. Know your numbers.', null, null, 
 -- audit trail
 select t_ok((select count(*) >= 8 from audit_log where business_id = t_get('biz')), 'audit trail recorded');
 select t_ok((select count(*) from audit_log where action in ('price_override_approved','sale_voided','stock_damage','expense_approved','member_updated')) >= 5, 'sensitive actions audited');
+
+
+-- 15. Import v2: optional prices, name matching, add-stock, default section --
+select t_as('frank@test.cm');
+select update_member((select id from memberships where user_id = (select user_id from profiles where email = 'staff@test.cm')), 'staff', true, '{}', false, true);
+select t_ok((import_products(t_get('biz'), '[{"category":"PHONE CHARGERS","name":"Oraimo 2A android","unit_cost":"1500","opening_stock":"10"},{"category":"CABLE","name":"Laptop  cable","unit_cost":"400","opening_stock":"6"},{"category":"CABLE","name":"VGA cable 9 pins (3m)","opening_stock":"0"}]'::jsonb, 'skip', t_get('elec'))->>'inserted')::int = 3, 'import without selling prices, default section');
+select t_put('chg', (select id from products where name = 'Oraimo 2A android'));
+select t_ok((select target_price is null and min_price is null and stock_qty = 10 and section_id = t_get('elec') from products where id = t_get('chg')), 'imported product has no price yet, stock 10, in default section');
+select t_ok((select avg_cost = 1500 from product_costs where product_id = t_get('chg')), 'imported cost price stored');
+select t_ok((select name = 'Laptop cable' from products where name ilike 'laptop%cable'), 'extra spaces in names cleaned');
+select t_ok((select count(*) = 1 from categories where business_id = t_get('biz') and name = 'Phone Chargers'), 'category created from sheet heading');
+select t_ok(not (import_products(t_get('biz'), '[{"name":"X","target_price":"100"}]'::jsonb)->>'ok')::boolean, 'row without section rejected when no default section');
+select t_ok(not (import_products(t_get('biz'), '[{"name":"Dup","target_price":"100"},{"name":"dup","target_price":"200"}]'::jsonb, 'skip', t_get('elec'))->>'ok')::boolean, 'same name twice in file rejected');
+-- re-import same names: skip
+select t_ok((import_products(t_get('biz'), '[{"name":"oraimo 2A Android","unit_cost":"1500","opening_stock":"10"}]'::jsonb, 'skip', t_get('elec'))->>'skipped')::int = 1, 'existing product matched by name (case-insensitive) and skipped');
+-- add stock: 10 @ 1500 + 10 @ 1700 -> WAC 1600, stock 20
+select t_ok((import_products(t_get('biz'), '[{"name":"Oraimo 2A android","unit_cost":"1700","opening_stock":"10"}]'::jsonb, 'add_stock', t_get('elec'))->>'stock_added')::int = 1, 'add-stock mode');
+select t_ok((select stock_qty = 20 from products where id = t_get('chg')), 'add-stock added quantity');
+select t_ok((select avg_cost = 1600 from product_costs where product_id = t_get('chg')), 'add-stock updated weighted average cost');
+select t_ok((select count(*) = 2 from stock_movements where product_id = t_get('chg')), 'add-stock wrote a ledger entry');
+-- update mode: set prices, blank cost keeps cost
+select import_products(t_get('biz'), '[{"name":"Oraimo 2A android","target_price":"2500","min_price":"2000"}]'::jsonb, 'update', t_get('elec'));
+select t_ok((select target_price = 2500 and min_price = 2000 from products where id = t_get('chg')), 'update mode sets prices');
+select t_ok((select avg_cost = 1600 from product_costs where product_id = t_get('chg')), 'blank cost in update keeps existing cost');
+
+-- unpriced products cannot be sold
+select t_as('staff@test.cm');
+select t_put('shift2', clock_in(t_get('biz')));
+select t_expect_error($$select finalize_sale(jsonb_build_object('business_id', t_get('biz'), 'client_tx_id', gen_random_uuid(), 'lines', jsonb_build_array(jsonb_build_object('product_id', (select id from products where name = 'Laptop cable'), 'quantity', 1, 'unit_price', 1000))))$$, 'no selling price yet');
+select t_expect_error($$select request_price_override(t_get('biz'), (select id from products where name = 'Laptop cable'), 500, 1, 'x')$$, 'no selling price yet');
+select t_ok((finalize_sale(jsonb_build_object('business_id', t_get('biz'), 'client_tx_id', gen_random_uuid(), 'lines', jsonb_build_array(jsonb_build_object('product_id', t_get('chg'), 'quantity', 1, 'unit_price', 2500))))->>'status') = 'completed', 'priced imported product sells');
+
+-- 16. Photos: shopkeeper may add a missing photo, not replace one -------------
+select set_product_image(t_get('chg'), 'https://example.com/a.jpg');
+select t_ok((select image_url = 'https://example.com/a.jpg' from products where id = t_get('chg')), 'shopkeeper added missing photo');
+select t_expect_error($$select set_product_image(t_get('chg'), 'https://example.com/b.jpg')$$, 'already has a photo');
+select t_expect_error($$select set_product_image(t_get('chg'), 'javascript:alert(1)')$$, 'Invalid image');
+select t_as('manager@test.cm');
+select set_product_image(t_get('chg'), 'https://example.com/c.jpg');
+select t_ok((select image_url = 'https://example.com/c.jpg' from products where id = t_get('chg')), 'manager replaced photo');
+select t_as('partner@test.cm');
+select t_expect_error($$select set_product_image(t_get('chg'), 'https://example.com/d.jpg')$$, 'cannot change photos');
+
+-- 17. Invitation with WhatsApp number -----------------------------------------
+reset role;
+insert into auth.users (instance_id, id, aud, role, email, raw_user_meta_data, created_at, updated_at) values
+ ('00000000-0000-0000-0000-000000000000', gen_random_uuid(), 'authenticated', 'authenticated', 'grace@test.cm', '{"full_name":"Grace"}', now(), now());
+set role authenticated;
+select t_as('frank@test.cm');
+select t_expect_error($$select create_invitation(t_get('biz'), 'grace@test.cm', 'staff', false, array[t_get('comp')], false, '12')$$, 'valid WhatsApp');
+select t_put('inv_g', create_invitation(t_get('biz'), 'grace@test.cm', 'staff', false, array[t_get('comp')], false, '+237 677 000 222'));
+select t_as('grace@test.cm');
+select accept_invitation(t_get('inv_g'));
+select t_ok((select phone = '+237 677 000 222' from profiles where email = 'grace@test.cm'), 'WhatsApp number saved to profile on join');
+select t_ok((select count(*) = 0 from products where business_id = t_get('biz') and not has_section(t_get('biz'), section_id) and false) and has_section(t_get('biz'), t_get('comp')) and not has_section(t_get('biz'), t_get('elec')), 'shopkeeper scoped to Components only');
 
 reset role;
 \echo ALL TESTS PASSED
