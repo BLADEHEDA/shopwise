@@ -9,7 +9,7 @@
 export const FIELDS = [
   { key: "name", label: "Product name", required: true, aliases: ["name", "item", "items", "item name", "product", "product name", "article", "designation", "désignation"] },
   { key: "unit_cost", label: "Cost price (owner only)", aliases: ["unit_cost", "cost", "cost price", "unit cost", "buying price", "purchase price", "landed cost", "cp", "prix d'achat"] },
-  { key: "opening_stock", label: "Quantity", aliases: ["opening_stock", "quantity", "qty", "stock", "opening stock", "in stock", "quantité", "qte"] },
+  { key: "opening_stock", label: "Quantity", aliases: ["opening_stock", "quantity", "qty", "stock", "opening stock", "in stock", "quantité", "qte", "qté", "quantite"] },
   { key: "target_price", label: "Target selling price", aliases: ["target_price", "target price", "selling price", "sale price", "retail price", "price", "sp", "prix de vente"] },
   { key: "min_price", label: "Minimum selling price", aliases: ["min_price", "minimum price", "min price", "minimum selling price", "floor price", "lowest price"] },
   { key: "category", label: "Category", aliases: ["category", "type", "group", "catégorie"] },
@@ -29,7 +29,7 @@ const KNOWN_BRANDS = ["Oraimo", "Samsung", "Apple", "Itel", "Tecno", "Infinix", 
 
 export type Cell = string | number | boolean | Date | null | undefined;
 export interface SheetIn { name: string; rows: Cell[][] }
-export interface ParsedRow { sheet: string; line: number; cells: string[]; category: string }
+export interface ParsedRow { sheet: string; line: number; cells: string[]; category: string; note?: string }
 export interface Parsed { header: string[]; rows: ParsedRow[]; headerLine: number; categories: string[]; skipped: { heading: string; rows: number }[] }
 
 const norm = (v: Cell) => (v === null || v === undefined ? "" : v instanceof Date ? v.toISOString().slice(0, 10) : String(v)).replace(/\s+/g, " ").trim();
@@ -188,6 +188,7 @@ export function toImportRows(parsed: Parsed, map: Mapping, opts: { addCategoryTo
       o.name = `${o.name} (${n})`;
       o._note = `Same name as an earlier row: imported as "${o.name}". Rename it later if you like.`;
     }
+    if (r.note) o._note = o._note ? `${o._note} · ${r.note}` : r.note;
     return o;
   });
 }

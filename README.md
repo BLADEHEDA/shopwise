@@ -30,6 +30,7 @@ The product name is not hard-coded. It is read from the `brand_config` table, so
    |---|---|
    | `NEXT_PUBLIC_SUPABASE_URL` | your Project URL |
    | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | your anon public key |
+   | `ANTHROPIC_API_KEY` | *(optional, for smart reading)* a key from [platform.claude.com](https://platform.claude.com) → API keys. Lets the app read photos of handwritten lists, scanned PDFs, Word files and messy sheets. Without it, Excel/CSV/text-PDF/Word-table imports still work. |
    | `DATABASE_URL` | Supabase → **Connect** → *Session pooler* connection string, with `[YOUR-PASSWORD]` replaced by your database password. Used only during the build to upgrade the database; never sent to browsers. |
 
 3. Click **Deploy**. Then go back to Supabase step 3 and put in the real Vercel URL.
@@ -49,9 +50,21 @@ The product name is not hard-coded. It is read from the `brand_config` table, so
 
 ---
 
-## Preparing an inventory sheet for import
+## Importing stock: any file
 
-Any shop can upload its own **Excel (.xlsx), CSV or PDF** (a PDF *exported* from Excel/Google Sheets; scanned photos can't be read). Nobody runs SQL: it's all in **Inventory → Import stock**. It works if:
+**Inventory → Import stock** accepts **Excel, CSV, PDF, Word (.docx) and photos** (several pages at once). Nobody runs SQL.
+
+1. **Tidy files** (a table with a heading row: Excel, CSV, PDF exported from Excel/Sheets, Word tables) are read **directly in the browser**: free and instant.
+2. **Everything else** (phone photos of handwritten lists, scanned PDFs, files without headings, Word text) goes to **smart reading**: the server sends it to Claude (`claude-sonnet-5-5`, vision + PDF), which returns each product's name, category, unit cost, quantity and any prices; it skips titles, totals and expenses, works out unit cost from a line total, and flags hard-to-read values.
+3. Either way, the person sees an **editable preview**: every cell can be corrected, rows can be left out, and the line value (cost × quantity), category subtotals and grand total update live. Nothing is saved until **Import**.
+4. Products without photos get a placeholder icon that matches their category; photos are added with the camera button.
+
+Smart reading costs roughly **0.03 USD per photo page** of a typical handwritten list (Claude Sonnet 5.5: $2 / $10 per million input/output tokens). Every call is logged in `ai_usage` and limited per business per 24 hours (default 40; demo shop 15). Change the limits:
+```sql
+update ai_settings set daily_limit_business = 100, daily_limit_demo = 10;
+```
+
+### Tips for a sheet that imports perfectly (no AI needed)
 
 1. **There is a heading row** with at least a name column: `Item` / `Name` / `Product`. Optional: `Cost Price`, `Quantity`, `Selling price` / `Target price`, `Min price`, `Category`, `Section`, `Brand`, `SKU`.
 2. **One product per row.** Numbers only in number columns (`1,500` and `1500 FCFA` are fine).
