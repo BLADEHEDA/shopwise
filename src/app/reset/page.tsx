@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { AuthLayout } from "@/components/auth-layout";
-import { Alert, Button, Field, Input } from "@/components/ui";
+import { Alert, Button, Field, PasswordInput } from "@/components/ui";
 import { errorMessage } from "@/lib/format";
 
 export default function ResetPage() {
@@ -34,7 +34,7 @@ export default function ResetPage() {
       {!ready ? <Alert tone="info">Open this page from the link in your reset email.</Alert> : (
         <form onSubmit={submit} className="space-y-4">
           {err && <Alert tone="danger">{err}</Alert>}
-          <Field label="New password"><Input type="password" autoComplete="new-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+          <Field label="New password"><PasswordInput autoComplete="new-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
           <Button type="submit" block size="lg" loading={busy}>Save password</Button>
         </form>
       )}

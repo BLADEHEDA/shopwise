@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { AuthLayout } from "@/components/auth-layout";
-import { Alert, Button, Field, Input } from "@/components/ui";
+import { Alert, Button, Field, Input, PasswordInput } from "@/components/ui";
 import { errorMessage } from "@/lib/format";
 
 function LoginForm() {
@@ -28,7 +28,7 @@ function LoginForm() {
     <form onSubmit={submit} className="space-y-4">
       {err && <Alert tone="danger">{err}</Alert>}
       <Field label="Email"><Input type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
-      <Field label="Password"><Input type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+      <Field label="Password"><PasswordInput autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
       <Button type="submit" block size="lg" loading={busy}>Sign in</Button>
       <div className="flex justify-between text-sm">
         <Link href="/forgot" className="font-medium text-brand hover:underline">Forgot password?</Link>

@@ -12,7 +12,11 @@ export async function generateMetadata(): Promise<Metadata> {
     description: brand.tagline,
     manifest: "/manifest.webmanifest",
     appleWebApp: { capable: true, title: brand.product_name, statusBarStyle: "default" },
-    icons: { icon: "/api/icon/192", apple: "/api/icon/180" },
+    icons: {
+      icon: [{ url: "/api/icon/32", sizes: "32x32", type: "image/png" }, { url: "/api/icon/192", sizes: "192x192", type: "image/png" }],
+      shortcut: "/api/icon/32",
+      apple: "/api/icon/180",
+    },
   };
 }
 

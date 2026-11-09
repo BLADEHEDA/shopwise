@@ -1,6 +1,6 @@
 "use client";
-import { forwardRef, useEffect, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
-import { LoaderCircle, X, CircleAlert, CircleCheck, Info } from "lucide-react";
+import { forwardRef, useEffect, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
+import { LoaderCircle, X, CircleAlert, CircleCheck, Info, Eye, EyeOff } from "lucide-react";
 import { cx } from "@/lib/format";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger" | "success";
@@ -41,6 +41,26 @@ export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputE
           invalid ? "border-red-500 focus:border-red-500" : "border-slate-300 focus:border-brand", className)}
         {...rest}
       />
+    );
+  });
+
+/** Password field with a show/hide toggle so people can check what they typed. */
+export const PasswordInput = forwardRef<HTMLInputElement, Omit<InputHTMLAttributes<HTMLInputElement>, "type"> & { invalid?: boolean }>(
+  function PasswordInput({ className, ...rest }, ref) {
+    const [show, setShow] = useState(false);
+    return (
+      <div className="relative">
+        <Input ref={ref} type={show ? "text" : "password"} className={cx("pr-12", className)} autoCapitalize="none" autoCorrect="off" spellCheck={false} {...rest} />
+        <button
+          type="button"
+          onClick={() => setShow((v) => !v)}
+          className="absolute inset-y-0 right-0 grid w-12 place-items-center rounded-r-xl text-slate-500 hover:text-ink focus-visible:outline-2 focus-visible:outline-brand"
+          aria-label={show ? "Hide password" : "Show password"}
+          aria-pressed={show}
+        >
+          {show ? <EyeOff className="size-5" /> : <Eye className="size-5" />}
+        </button>
+      </div>
     );
   });
 

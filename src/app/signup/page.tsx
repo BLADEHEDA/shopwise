@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { AuthLayout } from "@/components/auth-layout";
-import { Alert, Button, Field, Input } from "@/components/ui";
+import { Alert, Button, Field, Input, PasswordInput } from "@/components/ui";
 import { errorMessage } from "@/lib/format";
 
 function SignupForm() {
@@ -47,7 +47,7 @@ function SignupForm() {
       {err && <Alert tone="danger">{err}</Alert>}
       <Field label="Your full name"><Input required autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} /></Field>
       <Field label="Email"><Input type="email" required autoComplete="email" value={email} readOnly={!!invite && !!params.get("email")} onChange={(e) => setEmail(e.target.value)} /></Field>
-      <Field label="Password" hint="At least 8 characters"><Input type="password" required autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+      <Field label="Password" hint="At least 8 characters"><PasswordInput required autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
       <Button type="submit" block size="lg" loading={busy}>{invite ? "Create account & join" : "Create account"}</Button>
       <p className="text-center text-sm text-slate-600">Already have an account? <Link href={invite ? `/login?next=${encodeURIComponent(after)}` : "/login"} className="font-medium text-brand hover:underline">Sign in</Link></p>
     </form>
