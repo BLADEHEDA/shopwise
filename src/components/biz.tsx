@@ -15,6 +15,8 @@ interface BizCtx {
   sections: Section[];
   role: Role;
   isOwner: boolean;
+  /** super admin, or a shop owner/manager the super admin allowed to manage the team */
+  canManageTeam: boolean;
   isPlatformAdmin: boolean;
   shift: Shift | null;
   online: boolean;
@@ -133,6 +135,7 @@ export function BizProvider({ children, fallback }: { children: React.ReactNode;
     return {
       session, userId: session.user.id, profile: snap.profile, memberships: snap.memberships, membership, business,
       sections, role, isOwner, isPlatformAdmin: snap.isPlatformAdmin, shift, online,
+      canManageTeam: isOwner || (["section_owner", "manager"].includes(role) && !!membership.can_manage_team),
       hasSection, canViewCosts, canManage, canApprove,
       canReport: role !== "staff",
       canManageAny: isOwner || ["section_owner", "manager"].includes(role),

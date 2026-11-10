@@ -3,7 +3,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toPng } from "html-to-image";
-import { ChevronLeft, Share2, Printer, Download, MessageCircle, CloudUpload, ShoppingCart, Plus, Ban } from "lucide-react";
+import { ChevronLeft, Share2, Printer, Download, MessageCircle, CloudUpload, ShoppingCart, Plus, Ban, Paperclip } from "lucide-react";
 import { useBiz } from "@/components/biz";
 import { useToast } from "@/components/toast";
 import { PaymentBadge } from "@/components/badges";
@@ -15,6 +15,7 @@ import { useBrand } from "@/lib/brand";
 import { fmtMoney, minorToDecimal, toMinor } from "@/lib/money";
 import { cx, errorMessage, fmtDateTime, receiptLabel } from "@/lib/format";
 import type { Payment, PaymentMethod, Sale, SaleLine } from "@/lib/types";
+import { ProofButton, viewProof } from "@/components/proof";
 
 function ViewInner() {
   const params = useSearchParams();
@@ -191,7 +192,9 @@ function ViewInner() {
           {payments.length > 0 && <p className="pt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Payments</p>}
           {payments.map((p) => (
             <div key={p.id} className="flex justify-between gap-2 text-slate-600">
-              <span>{p.method_name}{p.reference ? ` (${p.reference})` : ""} <span className="text-xs text-slate-400">· {fmtDateTime(p.created_at, business.timezone)}</span></span><span className="tabular whitespace-nowrap">{fmtMoney(p.amount, cur)}</span>
+              <span>{p.method_name}{p.reference ? ` (${p.reference})` : ""} <span className="text-xs text-slate-400">· {fmtDateTime(p.created_at, business.timezone)}</span>
+                {p.proof_path && <button type="button" onClick={() => viewProof(p.proof_path!)} className="no-print ml-1 inline-flex items-center gap-0.5 rounded bg-emerald-50 px-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"><Paperclip className="size-3" /> proof</button>}
+              </span><span className="tabular whitespace-nowrap">{fmtMoney(p.amount, cur)}</span>
             </div>
           ))}
           {payments.length > 1 && <div className="flex justify-between text-slate-700"><span>Total paid</span><span className="tabular whitespace-nowrap font-semibold">{fmtMoney(s.amount_paid, cur)}</span></div>}
@@ -230,6 +233,7 @@ function PaymentSheet({ sale, methods, cur, onClose, onDone }: { sale: Sale; met
   const [amount, setAmount] = useState("");
   const [label, setLabel] = useState("");
   const [refNo, setRefNo] = useState("");
+  const [proof, setProof] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const m = methods.find((x) => x.id === method);
@@ -240,7 +244,7 @@ function PaymentSheet({ sale, methods, cur, onClose, onDone }: { sale: Sale; met
     if (!(toMinor(amount) > 0)) return setErr("Enter the amount received.");
     if (other && !label.trim()) return setErr("Say what the payment was (for example Bank transfer).");
     setBusy(true);
-    const { error } = await supabase().rpc("add_payment", { p_sale: sale.id, p_method: method, p_amount: minorToDecimal(toMinor(amount)), p_reference: refNo || null, p_label: other ? label.trim() : null });
+    const { error } = await supabase().rpc("add_payment", { p_sale: sale.id, p_method: method, p_amount: minorToDecimal(toMinor(amount)), p_reference: refNo || null, p_label: other ? label.trim() : null, p_proof: proof });
     setBusy(false);
     if (error) setErr(errorMessage(error)); else onDone();
   }
@@ -262,7 +266,12 @@ function PaymentSheet({ sale, methods, cur, onClose, onDone }: { sale: Sale; met
         <Field label="Amount received" hint={<button type="button" className="font-semibold text-brand" onClick={() => setAmount(String(sale.balance_due))}>Full balance: {fmtMoney(sale.balance_due, cur)}</button>}>
           <MoneyInput value={amount} onChange={setAmount} placeholder="Amount" />
         </Field>
-        {m?.kind !== "cash" && <Field label="Transaction ID (optional)"><Input value={refNo} onChange={(e) => setRefNo(e.target.value)} /></Field>}
+        {m?.kind !== "cash" && (
+          <>
+            <Field label="Transaction ID (optional)"><Input value={refNo} onChange={(e) => setRefNo(e.target.value)} /></Field>
+            <div><p className="mb-1.5 text-sm font-medium text-slate-700">Proof of payment (optional)</p><ProofButton businessId={sale.business_id} value={proof} onChange={setProof} /></div>
+          </>
+        )}
         {amount !== "" && left >= 0 && <p className={cx("text-sm font-semibold", left > 0 ? "text-amber-700" : "text-emerald-700")}>{left > 0 ? `Still owes ${fmtMoney(left, cur)} after this` : "This completes the payment"}</p>}
         {err && <Alert tone="danger">{err}</Alert>}
       </div>

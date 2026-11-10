@@ -67,7 +67,7 @@ select t_as('manager@test.cm');  select accept_invitation(t_get('inv_mgr'));
 
 -- staff cannot invite people
 select t_as('staff@test.cm');
-select t_expect_error($$select create_invitation(t_get('biz'), 'x@test.cm', 'owner', true, '{}', true)$$, 'Only a super admin');
+select t_expect_error($$select create_invitation(t_get('biz'), 'x@test.cm', 'owner', true, '{}', true)$$, 'can invite people');
 
 -- 2. Catalogue & stock -----------------------------------------------------
 select t_as('frank@test.cm');
@@ -363,7 +363,7 @@ select t_as('partner@test.cm');
 select t_ok(can_view_costs(t_get('biz'), t_get('comp')) and not can_view_costs(t_get('biz'), t_get('elec')), 'financial access only for the ticked section');
 select t_ok(has_section(t_get('biz'), t_get('elec')), 'still works in the other section (stock and prices)');
 select t_ok((select count(*) = 0 from product_costs where section_id = t_get('elec')), 'no cost prices from the hidden section');
-select t_expect_error($$select remove_member((select id from memberships where user_id = (select user_id from profiles where email = 'staff@test.cm')))$$, 'Only a super admin');
+select t_expect_error($$select remove_member((select id from memberships where user_id = (select user_id from profiles where email = 'staff@test.cm')))$$, 'not allowed to remove');
 select t_as('frank@test.cm');
 select set_member_cost_sections((select id from memberships where user_id = (select user_id from profiles where email = 'partner@test.cm')), null);
 select t_ok((select cost_section_ids is null from memberships where user_id = (select user_id from profiles where email = 'partner@test.cm')), 'financial access back to all sections');
@@ -371,6 +371,26 @@ select t_expect_error($$select remove_member((select id from memberships where b
 select remove_member((select id from memberships where business_id = t_get('biz') and user_id = (select user_id from profiles where email = 'manager@test.cm')));
 select t_ok(not exists (select 1 from memberships where business_id = t_get('biz') and user_id = (select user_id from profiles where email = 'manager@test.cm')), 'super admin removed the manager');
 select t_ok(exists (select 1 from audit_log where business_id = t_get('biz') and action = 'member_removed'), 'removal is in the audit log');
+
+-- one super admin; trusted shop owners may manage the team; drafts are private
+select t_as('frank@test.cm');
+select t_expect_error($$select create_invitation(t_get('biz'), 'second@test.cm', 'owner', true, '{}', true, null)$$, 'only one super admin');
+select t_expect_error($$select update_member((select id from memberships where business_id = t_get('biz') and user_id = (select user_id from profiles where email = 'partner@test.cm')), 'owner', true, '{}', true, true)$$, 'only one super admin');
+select set_team_access((select id from memberships where business_id = t_get('biz') and user_id = (select user_id from profiles where email = 'partner@test.cm')), true);
+select t_as('partner@test.cm');
+select t_ok(can_manage_team(t_get('biz')), 'super admin let a shop owner manage the team');
+select t_ok(create_invitation(t_get('biz'), 'newstaff@test.cm', 'staff', false, array[t_get('comp')], false, null) is not null, 'that shop owner can invite a shopkeeper');
+select t_expect_error($$select remove_member((select id from memberships where business_id = t_get('biz') and role = 'owner' limit 1))$$, 'super admin');
+select t_expect_error($$select update_member((select id from memberships where business_id = t_get('biz') and role = 'owner' limit 1), 'staff', true, '{}', false, true)$$, 'super admin');
+select t_expect_error($$select update_member((select id from memberships where business_id = t_get('biz') and user_id = auth.uid()), 'section_owner', true, '{}', true, true)$$, 'own access');
+select t_expect_error($$select set_team_access((select id from memberships where business_id = t_get('biz') and user_id = (select user_id from profiles where email = 'staff@test.cm')), true)$$, 'Only the super admin');
+select t_as('staff@test.cm');
+insert into pos_drafts (business_id, user_id, data) values (t_get('biz'), auth.uid(), '{"v":1}');
+select t_ok((select count(*) = 1 from pos_drafts), 'shopkeeper saves a sale in progress');
+select t_ok(not can_manage_team(t_get('biz')), 'shopkeeper cannot manage the team');
+select t_as('partner@test.cm');
+select t_ok((select count(*) = 0 from pos_drafts), 'nobody else sees that draft');
+select t_ok(shopwise_schema() = 9, 'schema version 9');
 
 reset role;
 \echo ALL TESTS PASSED

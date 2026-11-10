@@ -34,6 +34,7 @@ export interface Membership {
   all_sections: boolean;
   can_view_costs: boolean;
   cost_section_ids?: string[] | null;
+  can_manage_team?: boolean;
   active: boolean;
   businesses?: Business;
   section_ids?: string[];
@@ -105,7 +106,7 @@ export interface SaleLine {
   override_id: string | null;
 }
 
-export interface Payment { id: string; sale_id: string; method_name: string; amount: number; reference: string | null; created_at: string }
+export interface Payment { id: string; sale_id: string; method_name: string; amount: number; reference: string | null; proof_path?: string | null; created_at: string }
 
 export interface Report {
   scope: "own" | "business";

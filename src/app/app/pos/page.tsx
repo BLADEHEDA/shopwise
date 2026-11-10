@@ -8,6 +8,8 @@ import { useToast } from "@/components/toast";
 import { Alert, Badge, Button, Card, EmptyState, Field, Input, MoneyInput, Sheet, Spinner, Textarea } from "@/components/ui";
 import { ShiftCard } from "@/components/shift-card";
 import { ProductThumb } from "@/components/product-photo";
+import { ProofButton } from "@/components/proof";
+import { loadDraft, saveLocalDraft, saveServerDraft, type Draft } from "@/lib/pos-draft";
 import { supabase } from "@/lib/supabase";
 import { cacheCatalogue, cachedCatalogue, db, queueSale } from "@/lib/offline";
 import { fmtMinor, fmtMoney, minorToDecimal, toMinor, type Minor } from "@/lib/money";
@@ -16,7 +18,7 @@ import type { PaymentMethod, Product } from "@/lib/types";
 
 interface Override { id: string; status: "pending" | "approved" | "rejected" | "cancelled"; approved_price: number | null; note?: string | null }
 interface Line { key: string; product: Product; qty: number; price: string; override?: Override }
-interface Pay { key: string; method_id: string; amount: string; reference: string; label: string }
+interface Pay { key: string; method_id: string; amount: string; reference: string; label: string; proof?: string | null }
 
 function lineState(l: Line): { ok: boolean; reason?: string; belowMin: boolean } {
   const p = toMinor(l.price);
@@ -53,6 +55,7 @@ export default function POS() {
   const [ovLine, setOvLine] = useState<Line | null>(null);
   const [ovReason, setOvReason] = useState("");
   const [offlineDone, setOfflineDone] = useState<{ ref: string; lines: { name: string; qty: number; total: Minor }[]; total: Minor; paid: Minor; customer: string } | null>(null);
+  const [otherOpen, setOtherOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const handledOverrides = useRef(new Set<string>());
 
@@ -77,6 +80,43 @@ export default function POS() {
     }
   }, [business.id]);
   useEffect(() => { load(); }, [load, online]);
+
+  // ---------------------------------------------------------------- sale in progress (draft)
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current || products === null) return;
+    restored.current = true;
+    loadDraft(business.id, biz.userId, online).then((d) => {
+      if (!d || (!d.lines.length && !d.pays.length)) return;
+      const byId = new Map(products.map((p) => [p.id, p]));
+      const ls: Line[] = d.lines.flatMap((l) => { const p = byId.get(l.product_id); return p ? [{ key: l.key, product: p, qty: l.qty, price: l.price, override: l.override as Override | undefined }] : []; });
+      if (!ls.length && !d.pays.length) return;
+      setLines(ls); setPays(d.pays.map((x) => ({ ...x, proof: x.proof ?? null }))); setCustomer(d.customer); setTxId(d.tx_id);
+      setStep(ls.length ? d.step : "browse");
+      toast(`Sale in progress restored (${ls.reduce((t, l) => t + l.qty, 0)} items)`);
+    });
+  }, [products, business.id, biz.userId, online, toast]);
+  const serverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hadDraft = useRef(false);
+  const pendingClear = useRef(false);
+  useEffect(() => {
+    if (!restored.current) return;
+    const empty = !lines.length && !pays.length && !customer.name && !customer.phone;
+    const d: Draft | null = empty ? null : {
+      v: 1, saved_at: new Date().toISOString(), tx_id: txId, step,
+      lines: lines.map((l) => ({ key: l.key, product_id: l.product.id, qty: l.qty, price: l.price, override: l.override })),
+      pays, customer,
+    };
+    saveLocalDraft(business.id, biz.userId, d);
+    // only tell the server "cleared" when a sale in progress actually ended
+    const ended = !d && hadDraft.current;
+    hadDraft.current = !!d;
+    if (!d && !ended && !pendingClear.current) return;
+    if (serverTimer.current) clearTimeout(serverTimer.current);
+    if (!online) { if (ended) pendingClear.current = true; return; }
+    pendingClear.current = false;
+    serverTimer.current = setTimeout(() => saveServerDraft(business.id, biz.userId, d), d ? 1200 : 0);
+  }, [lines, pays, customer, step, txId, business.id, biz.userId, online]);
 
   const mine = useMemo(() => (products || []).filter((p) => biz.hasSection(p.section_id)), [products, biz]);
   // products imported without a selling price can't be sold until a price is set
@@ -177,6 +217,7 @@ export default function POS() {
   const used = (m: PaymentMethod) => !isOther(m) && pays.some((p) => p.method_id === m.id);
   function addPay(m: PaymentMethod) {
     if (used(m)) return;
+    if (isOther(m)) { setOtherOpen(true); return; }
     setPays((ps) => [...ps, { key: uuid(), method_id: m.id, amount: "", reference: "", label: "" }]);
   }
   const setPay = (key: string, ch: Partial<Pay>) => setPays((ps) => ps.map((x) => (x.key === key ? { ...x, ...ch } : x)));
@@ -202,7 +243,7 @@ export default function POS() {
       note: customer.note.trim() || null,
       sold_at: new Date().toISOString(),
       lines: lines.map((l) => ({ product_id: l.product.id, quantity: l.qty, unit_price: minorToDecimal(toMinor(l.price)), override_id: l.override?.status === "approved" ? l.override.id : null })),
-      payments: pays.map((p) => ({ method_id: p.method_id, amount: minorToDecimal(toMinor(p.amount)), reference: p.reference.trim() || null, label: p.label.trim() || null })),
+      payments: pays.map((p) => ({ method_id: p.method_id, amount: minorToDecimal(toMinor(p.amount)), reference: p.reference.trim() || null, label: p.label.trim() || null, proof_path: p.proof || null })),
     };
 
     const goOffline = async () => {
@@ -330,9 +371,15 @@ export default function POS() {
                 <div className="mt-2 grid grid-cols-2 gap-2">
                   <MoneyInput aria-label={`${other ? "Other" : m?.name} amount`} value={p.amount} onChange={(v) => setPay(p.key, { amount: v })} placeholder="Amount received" autoFocus={!other} />
                   {m?.kind !== "cash"
-                    ? <Input placeholder="Transaction ID (optional)" value={p.reference} onChange={(e) => setPay(p.key, { reference: e.target.value })} />
+                    ? <Input placeholder="Transaction ID (optional)" value={p.reference} onChange={(e) => setPay(p.key, { reference: e.target.value })} aria-label={`${other ? p.label || "Other" : m?.name} transaction ID`} />
                     : <div />}
                 </div>
+                {m?.kind !== "cash" && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <ProofButton businessId={business.id} value={p.proof} onChange={(v) => setPay(p.key, { proof: v })} disabled={!online} />
+                    <span className="text-xs text-slate-500">Screenshot instead of typing the ID</span>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -361,6 +408,14 @@ export default function POS() {
         <Button size="lg" block onClick={complete} loading={busy} variant="success" className="text-lg">
           {!online ? `Save sale offline · ${fmtMinor(total, cur)}` : balance > 0 ? `Save part payment · owes ${fmtMinor(balance, cur)}` : `Complete sale · ${fmtMinor(total, cur)}`}
         </Button>
+        {otherOpen && (
+        <OtherPaySheet businessId={business.id} cur={cur} rest={Math.max(0, balance)} online={online} onClose={() => setOtherOpen(false)}
+          onAdd={(x) => {
+            const m = methods.find((mm) => mm.name === "Other");
+            if (m) setPays((ps) => [...ps, { key: uuid(), method_id: m.id, ...x }]);
+            setOtherOpen(false);
+          }} />
+      )}
       </div>
     );
   }
@@ -504,7 +559,7 @@ export default function POS() {
 
       <Sheet open={!!ovLine} onClose={() => setOvLine(null)} title="Ask owner to approve price"
         footer={<Button block size="lg" onClick={requestOverride} disabled={!online}><ShieldCheck className="size-5" /> Send request</Button>}>
-        {ovLine && (
+      {ovLine && (
           <div className="space-y-3">
             <div className="rounded-xl bg-slate-50 p-3 text-sm">
               <p className="font-semibold">{ovLine.product.name} × {ovLine.qty}</p>
@@ -605,5 +660,50 @@ function QtyBox({ value, max, label, onChange }: { value: number; max: number; l
       onChange={(e) => setText(e.target.value.replace(/\D/g, "").slice(0, 5))} onBlur={apply}
       onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
       className="tabular h-9 min-w-0 flex-1 rounded-lg border border-brand-200 bg-white text-center text-base font-bold text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/20" />
+  );
+}
+
+const OTHER_SUGGESTIONS = ["Bank transfer", "Card", "Bitcoin / crypto", "Wave", "PayPal", "Cheque"];
+
+/** "Other" payment: say what it was, how much, and attach the proof. */
+function OtherPaySheet({ businessId, cur, rest, online, onClose, onAdd }: {
+  businessId: string; cur: string; rest: Minor; online: boolean; onClose: () => void;
+  onAdd: (p: { amount: string; reference: string; label: string; proof: string | null }) => void;
+}) {
+  const [label, setLabel] = useState("");
+  const [amount, setAmount] = useState("");
+  const [reference, setReference] = useState("");
+  const [proof, setProof] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  function save() {
+    if (!label.trim()) return setErr("Write how the customer paid, e.g. Bank transfer.");
+    if (!(toMinor(amount) > 0)) return setErr("Enter the amount received.");
+    onAdd({ label: label.trim(), amount, reference: reference.trim(), proof });
+  }
+  return (
+    <Sheet open onClose={onClose} title="Other payment method" footer={<Button block size="lg" onClick={save}>Add this payment</Button>}>
+      <div className="space-y-4">
+        <Field label="How did the customer pay?">
+          <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Bank transfer, Bitcoin, Card" autoFocus />
+        </Field>
+        <div className="-mt-2 flex flex-wrap gap-2">
+          {OTHER_SUGGESTIONS.map((x) => (
+            <button key={x} type="button" onClick={() => setLabel(x)}
+              className={cx("h-8 rounded-full border px-3 text-xs font-medium", label === x ? "border-brand bg-brand text-white" : "border-slate-300 bg-white text-slate-700")}>{x}</button>
+          ))}
+        </div>
+        <Field label="Amount received" hint={rest > 0 ? <button type="button" className="font-semibold text-brand" onClick={() => setAmount(minorToDecimal(rest).replace(/\.00$/, ""))}>Rest: {fmtMinor(rest, cur)}</button> : undefined}>
+          <MoneyInput value={amount} onChange={setAmount} placeholder="Amount" aria-label="Other payment amount" />
+        </Field>
+        <Field label="Transaction ID / reference (optional)">
+          <Input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="e.g. wallet transaction hash" />
+        </Field>
+        <div>
+          <p className="mb-1.5 text-sm font-medium text-slate-700">Proof of payment (optional)</p>
+          <ProofButton businessId={businessId} value={proof} onChange={setProof} disabled={!online} />
+        </div>
+        {err && <Alert tone="danger">{err}</Alert>}
+      </div>
+    </Sheet>
   );
 }

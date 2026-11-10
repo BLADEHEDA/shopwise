@@ -111,7 +111,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Link href={`/app/feedback?from=${encodeURIComponent(path)}`} className="shrink-0 font-semibold underline">Give feedback</Link>
           </div>
         )}
-        <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-4 lg:px-8 lg:pb-10">{children}</main>
+        <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-4 lg:px-8 lg:pb-10">
+          {biz.isOwner && <SchemaCheck />}
+          {children}
+        </main>
       </div>
 
       {/* mobile bottom navigation */}
@@ -154,6 +157,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </button>
         </div>
       </Sheet>
+    </div>
+  );
+}
+
+/** The app expects this database version (supabase/migrations/00NN_*.sql).
+ *  Upgrades run automatically on each Vercel deploy when DATABASE_URL is set;
+ *  if they didn't, tell the super admin instead of failing silently. */
+const EXPECTED_SCHEMA = 9;
+function SchemaCheck() {
+  const [have, setHave] = useState<number | null>(null);
+  useEffect(() => {
+    let off = false;
+    supabase().rpc("shopwise_schema").then(({ data, error }) => { if (!off) setHave(error ? 0 : Number(data)); });
+    return () => { off = true; };
+  }, []);
+  if (have === null || have >= EXPECTED_SCHEMA) return null;
+  return (
+    <div role="alert" className="mb-4 rounded-2xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+      <b>Your database is missing the latest update</b> (version {have || "8 or older"}, needs {EXPECTED_SCHEMA}). Some features won&apos;t work until it&apos;s applied.
+      In Vercel → Settings → Environment Variables, make sure <code className="rounded bg-white px-1">DATABASE_URL</code> is set (Supabase → Connect → Session pooler), then Redeploy.
     </div>
   );
 }

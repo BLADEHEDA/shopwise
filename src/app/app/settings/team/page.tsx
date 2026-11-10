@@ -22,7 +22,7 @@ function waNumber(phone: string): string {
 }
 
 const ROLE_HELP: Record<Role, string> = {
-  owner: "Full access to everything: all sections, costs, profit, team and settings. You can have several super admins (e.g. co-owners of the shop) with identical rights; each still has their own login so the app knows who did what.",
+  owner: "The person who created the business. Sees and controls everything, and can never be removed. There is only one per business. For a co-owner, use Shop owner with all sections, financial access and \"Can manage the team\".",
   section_owner: "Owns one or more sections (e.g. a partner's business inside the shop). Sees stock, cost prices, profit and approvals for their own sections only.",
   manager: "Runs day-to-day operations (products, stock, staff) for the sections you choose. Seeing costs and profit is optional.",
   staff: "Sells at the POS in the sections you tick (e.g. section A and B, or only B). Sees only their own sales and never sees cost prices.",
@@ -52,7 +52,7 @@ export default function TeamPage() {
   }, [business.id]);
   useEffect(() => { load(); }, [load]);
 
-  if (!biz.isOwner) return <Alert tone="warning">Only the business owner can manage the team.</Alert>;
+  if (!biz.canManageTeam) return <Alert tone="warning">Only the super admin, or a shop owner they allowed to manage the team, can open this page.</Alert>;
   const inviteUrl = (t: string) => `${typeof window !== "undefined" ? window.location.origin : ""}/invite?t=${t}`;
   const scope = (m: { all_sections: boolean; section_ids?: string[]; role: Role }) =>
     m.role === "owner" || m.all_sections ? "All sections" : (m.section_ids || []).map((id) => sections.find((s) => s.id === id)?.name).filter(Boolean).join(", ") || "No sections";
@@ -81,9 +81,11 @@ export default function TeamPage() {
                 <div className="grid size-10 place-items-center rounded-full bg-brand-100 font-semibold text-brand-700">{(m.profiles?.full_name || m.profiles?.email || "?").charAt(0).toUpperCase()}</div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-medium">{m.profiles?.full_name || m.profiles?.email} {m.user_id === userId && <span className="text-xs text-slate-500">(you)</span>} {!m.active && <Badge tone="danger">Disabled</Badge>}</p>
-                  <p className="truncate text-xs text-slate-500">{ROLE_LABEL[m.role]} · {scope(m)}{m.can_view_costs && m.role !== "owner" ? (m.cost_section_ids ? ` · costs: ${m.cost_section_ids.map((id) => sections.find((x) => x.id === id)?.name).filter(Boolean).join(", ")}` : " · sees costs") : ""}</p>
+                  <p className="truncate text-xs text-slate-500">{ROLE_LABEL[m.role]} · {scope(m)}{m.can_view_costs && m.role !== "owner" ? (m.cost_section_ids ? ` · costs: ${m.cost_section_ids.map((id) => sections.find((x) => x.id === id)?.name).filter(Boolean).join(", ")}` : " · sees costs") : ""}{m.can_manage_team && m.role !== "owner" ? " · manages team" : ""}</p>
                 </div>
-                <Button size="sm" variant="secondary" onClick={() => setEditing(m)}>Edit</Button>
+                {m.role === "owner" ? <Badge tone="brand">Created the business</Badge>
+                  : m.user_id === userId && !biz.isOwner ? null
+                  : <Button size="sm" variant="secondary" onClick={() => setEditing(m)}>Edit</Button>}
               </li>
             ))}
           </ul>
@@ -129,7 +131,7 @@ const ROLE_SHORT: Record<Role, string> = {
   section_owner: "Owns sections of the shop: their stock, sales and (if you allow) profit.",
   manager: "Runs products, stock and staff for the sections you pick.",
   accountant: "Views reports only. Can't change anything.",
-  owner: "Full access to everything, like you.",
+  owner: "The person who created the business. Only one per business.",
 };
 
 function Toggle({ checked, onChange, label, sub }: { checked: boolean; onChange: (v: boolean) => void; label: React.ReactNode; sub?: React.ReactNode }) {
@@ -163,8 +165,9 @@ function Chips({ items, value, onChange, label }: { items: { id: string; name: s
 }
 
 function MemberSheet({ member, onClose, onInvited, onSaved, onRemoved }: { member: Member | null; onClose: () => void; onInvited: (token: string, phone: string) => void; onSaved: () => void; onRemoved: () => void }) {
-  const { business, sections, userId } = useBiz();
+  const { business, sections, userId, isOwner } = useBiz();
   const dialog = useDialog();
+  const [team, setTeam] = useState(member?.can_manage_team ?? false);
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [role, setRole] = useState<Role>(member?.role || "staff");
@@ -177,6 +180,7 @@ function MemberSheet({ member, onClose, onInvited, onSaved, onRemoved }: { membe
   const [busy, setBusy] = useState(false);
   const isOwnerRole = role === "owner";
   const financialRole = role === "manager" || role === "section_owner" || role === "accountant";
+  const teamRole = role === "manager" || role === "section_owner";
   const theirSections = all ? sections : sections.filter((s) => secs.includes(s.id));
   const name = member?.profiles?.full_name || member?.profiles?.email || "";
   const self = member?.user_id === userId;
@@ -197,12 +201,20 @@ function MemberSheet({ member, onClose, onInvited, onSaved, onRemoved }: { membe
         const r = await sb.rpc("set_invitation_cost_sections", { p_token: data, p_section_ids: limit });
         if (r.error) { setBusy(false); return setErr(errorMessage(r.error)); }
       }
+      if (!error && isOwner && teamRole && team) {
+        const r = await sb.rpc("set_invitation_team_access", { p_token: data, p_allowed: true });
+        if (r.error) { setBusy(false); return setErr(errorMessage(r.error)); }
+      }
       setBusy(false);
       if (error) setErr(errorMessage(error)); else onInvited(data as string, phone.trim());
     } else {
       const { error } = await sb.rpc("update_member", { p_membership: member.id, p_role: role, p_all_sections: all, p_section_ids: secs, p_can_view_costs: viewCosts, p_active: active });
       if (!error && !isOwnerRole) {
         const r = await sb.rpc("set_member_cost_sections", { p_membership: member.id, p_section_ids: limit });
+        if (r.error) { setBusy(false); return setErr(errorMessage(r.error)); }
+      }
+      if (!error && isOwner && !isOwnerRole && (member.can_manage_team ?? false) !== (teamRole && team)) {
+        const r = await sb.rpc("set_team_access", { p_membership: member.id, p_allowed: teamRole && team });
         if (r.error) { setBusy(false); return setErr(errorMessage(r.error)); }
       }
       setBusy(false);
@@ -237,12 +249,12 @@ function MemberSheet({ member, onClose, onInvited, onSaved, onRemoved }: { membe
           </section>
         )}
 
-        <section>
+        {!isOwnerRole && <section>
           <h3 className="mb-2 text-sm font-semibold text-slate-700">Role</h3>
           <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Role">
-            {(["staff", "section_owner", "manager", "accountant", "owner"] as Role[]).map((r) => (
+            {(["staff", "section_owner", "manager", "accountant"] as Role[]).map((r) => (
               <button key={r} type="button" role="radio" aria-checked={role === r} disabled={self && r !== "owner"}
-                onClick={() => { setRole(r); if (r === "staff") setCosts(false); if (r === "section_owner") setCosts(true); }}
+                onClick={() => { setRole(r); if (r === "staff") setCosts(false); if (r === "section_owner") setCosts(true); if (r !== "section_owner" && r !== "manager") setTeam(false); }}
                 className={cx("flex items-start gap-2.5 rounded-xl border p-3 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-brand/40 disabled:opacity-40",
                   role === r ? "border-brand bg-brand-50 ring-1 ring-brand" : "border-slate-200 bg-white hover:border-brand/50")}>
                 <span className={cx("mt-0.5 grid size-4 shrink-0 place-items-center rounded-full border-2", role === r ? "border-brand" : "border-slate-300")}>
@@ -252,7 +264,7 @@ function MemberSheet({ member, onClose, onInvited, onSaved, onRemoved }: { membe
               </button>
             ))}
           </div>
-        </section>
+        </section>}
 
         {!isOwnerRole && (
           <section className="space-y-2">
@@ -288,7 +300,13 @@ function MemberSheet({ member, onClose, onInvited, onSaved, onRemoved }: { membe
           </section>
         )}
         {role === "staff" && <Alert tone="info">Shopkeepers never see cost prices, suppliers or profit.</Alert>}
-        {isOwnerRole && <Alert tone="warning">A super admin sees and controls everything, including the team. A super admin account can&apos;t be removed.</Alert>}
+        {isOwnerRole && <Alert tone="info" title="Super admin">The person who created the business. Sees and controls everything and can never be removed. To hand the business over, change this account&apos;s login email and password in Settings → Login &amp; security.</Alert>}
+        {teamRole && isOwner && (
+          <section className="space-y-2">
+            <h3 className="text-sm font-semibold text-slate-700">Team management</h3>
+            <Toggle checked={team} onChange={setTeam} label="Can manage the team" sub="Invite, edit and remove shopkeepers and other shop owners. They can never change or remove you (the super admin), and can't change their own access." />
+          </section>
+        )}
 
         {member && (
           <section className="space-y-2">

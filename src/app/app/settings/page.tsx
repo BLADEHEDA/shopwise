@@ -64,12 +64,10 @@ export default function SettingsPage() {
 
       {biz.isPlatformAdmin && <DemoControls />}
 
-      {isOwner && (
-        <>
           <div className="grid gap-3 sm:grid-cols-3">
             {[
-              { href: "/app/settings/team", label: "Team & permissions", sub: "Invite partners and staff", icon: Users, show: true },
-              { href: "/app/settings/audit", label: "Audit log", sub: "Who changed what", icon: History, show: true },
+              { href: "/app/settings/team", label: "Team & permissions", sub: "Invite partners and staff", icon: Users, show: biz.canManageTeam },
+              { href: "/app/settings/audit", label: "Audit log", sub: "Who changed what", icon: History, show: biz.canManageTeam },
               { href: "/app/settings/brand", label: "Product branding", sub: "Platform admin only", icon: Palette, show: biz.isPlatformAdmin },
             ].filter((x) => x.show).map((x) => (
               <Link key={x.href} href={x.href}>
@@ -82,6 +80,8 @@ export default function SettingsPage() {
             ))}
           </div>
 
+      {isOwner && (
+        <>
           <Card className="space-y-3 p-4">
             <h2 className="font-semibold">Business profile</h2>
             <div className="flex items-center gap-4">
