@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { useDialog } from "@/components/dialog";
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { useBiz } from "@/components/biz";
@@ -25,6 +26,7 @@ export default function BrandPage() {
   const biz = useBiz();
   const { brand, reload } = useBrand();
   const toast = useToast();
+  const dialog = useDialog();
   const [f, setF] = useState({ ...brand, logo_url: brand.logo_url || "", icon_url: brand.icon_url || "", support_email: brand.support_email || "", support_phone: brand.support_phone || "" });
   const [busy, setBusy] = useState(false);
 
@@ -39,7 +41,7 @@ export default function BrandPage() {
 
   async function save() {
     if (!/^#[0-9a-f]{6}$/i.test(f.primary_color)) { toast("Colour must be a hex value like #3158C9", "error"); return; }
-    if (isTeal(f.primary_color) && !confirm("This colour looks teal/turquoise, which the brand brief avoids. Save anyway?")) return;
+    if (isTeal(f.primary_color) && !(await dialog.confirm({ title: "Use a teal colour?", message: "This colour looks teal/turquoise, which the brand guide avoids.", confirmLabel: "Save anyway", tone: "warning" }))) return;
     setBusy(true);
     const { error } = await supabase().rpc("update_brand", {
       p_product_name: f.product_name, p_tagline: f.tagline, p_logo_url: f.logo_url, p_icon_url: f.icon_url, p_primary_color: f.primary_color,

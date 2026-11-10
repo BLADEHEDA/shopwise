@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Search, Minus, Plus, Trash2, ShoppingCart, ChevronLeft, ShieldCheck, Hourglass, CircleX, WifiOff, Package, X, Check } from "lucide-react";
+import { chime } from "@/lib/feedback";
 import { useBiz } from "@/components/biz";
 import { useToast } from "@/components/toast";
 import { Alert, Badge, Button, Card, EmptyState, Field, Input, MoneyInput, Sheet, Spinner, Textarea } from "@/components/ui";
@@ -41,6 +42,7 @@ export default function POS() {
   const [fromCache, setFromCache] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [section, setSection] = useState<string>("all");
+  const [category, setCategory] = useState<string>("all");
   const [lines, setLines] = useState<Line[]>([]);
   const [step, setStep] = useState<"browse" | "cart" | "pay">("browse");
   const [customer, setCustomer] = useState({ name: "", phone: "", note: "" });
@@ -80,11 +82,19 @@ export default function POS() {
   // products imported without a selling price can't be sold until a price is set
   const sellable = useMemo(() => mine.filter((p) => p.target_price !== null && p.min_price !== null), [mine]);
   const unpriced = mine.length - sellable.length;
+  const catName = (p: Product) => p.categories?.name || "Other";
+  const inSection = useMemo(() => sellable.filter((p) => section === "all" || p.section_id === section), [sellable, section]);
+  const categories = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of inSection) m.set(catName(p), (m.get(catName(p)) || 0) + 1);
+    return Array.from(m.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [inSection]);
   const visible = useMemo(() => {
     const s = q.trim().toLowerCase();
-    return sellable.filter((p) => (section === "all" || p.section_id === section) && (!s ||
+    // searching looks across all categories so nothing is "hidden" by a chip
+    return inSection.filter((p) => (s ? true : category === "all" || catName(p) === category) && (!s ||
       [p.name, p.brand, p.model, p.sku, p.barcode, p.variant_label, p.categories?.name].some((v) => v && v.toLowerCase().includes(s))));
-  }, [sellable, q, section]);
+  }, [inSection, q, category]);
 
   // ---------------------------------------------------------------- cart
   const add = (p: Product) => {
@@ -95,12 +105,25 @@ export default function POS() {
     });
     setErr(null);
   };
+  // set the quantity of a product straight from its card (+ / − / typed number)
+  const setQtyFor = (p: Product, n: number) => {
+    setLines((ls) => {
+      const others = ls.filter((l) => l.product.id === p.id && l.override).reduce((t, l) => t + l.qty, 0);
+      const want = Math.max(0, Math.min(Math.floor(n) || 0, p.stock_qty - others));
+      const ex = ls.find((l) => l.product.id === p.id && !l.override);
+      if (want === 0) return ex ? ls.filter((l) => l !== ex) : ls;
+      if (ex) return ls.map((l) => (l === ex ? { ...l, qty: want } : l));
+      return [...ls, { key: uuid(), product: p, qty: want, price: String(p.target_price) }];
+    });
+    setErr(null);
+  };
   const update = (key: string, patch: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
   const remove = (key: string) => setLines((ls) => ls.filter((l) => l.key !== key));
 
   const total: Minor = lines.reduce((s, l) => s + (Number.isNaN(toMinor(l.price)) ? 0 : toMinor(l.price) * l.qty), 0);
   const items = lines.reduce((s, l) => s + l.qty, 0);
   const qtyInCart = (id: string) => lines.filter((l) => l.product.id === id).reduce((s, l) => s + l.qty, 0);
+  const qtyOverride = (id: string) => lines.filter((l) => l.product.id === id && l.override).reduce((s, l) => s + l.qty, 0);
   const allValid = lines.length > 0 && lines.every((l) => lineState(l).ok);
   const stockProblems = lines.filter((l) => qtyInCart(l.product.id) > l.product.stock_qty);
 
@@ -212,6 +235,7 @@ export default function POS() {
     const res = data as { sale_id: string };
     reset();
     load();
+    chime("success");
     router.push(`/app/sales/view?id=${res.sale_id}&new=1`);
   }
 
@@ -363,11 +387,22 @@ export default function POS() {
               }} />
           </div>
           {biz.mySections.length > 1 && (
-            <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
+            <div className="mt-2 flex items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none]" role="group" aria-label="Sections">
+              <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-slate-500">Section</span>
               {[{ id: "all", name: "All" }, ...biz.mySections].map((s) => (
-                <button key={s.id} onClick={() => setSection(s.id)}
-                  className={cx("whitespace-nowrap rounded-full border px-3 py-1 text-sm font-medium", section === s.id ? "border-brand bg-brand text-white" : "border-slate-300 bg-white text-slate-700")}>
+                <button key={s.id} onClick={() => { setSection(s.id); setCategory("all"); }} aria-pressed={section === s.id}
+                  className={cx("shrink-0 whitespace-nowrap rounded-lg border px-2.5 py-1 text-xs font-semibold", section === s.id ? "border-ink bg-ink text-white" : "border-slate-300 bg-white text-slate-700")}>
                   {s.name}
+                </button>
+              ))}
+            </div>
+          )}
+          {categories.length > 1 && (
+            <div className="-mx-4 mt-2 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] lg:mx-0 lg:px-0" role="group" aria-label="Categories">
+              {[["all", inSection.length] as [string, number], ...categories].map(([c, n]) => (
+                <button key={c} onClick={() => { setCategory(c); setQ(""); }} aria-pressed={category === c && !q}
+                  className={cx("shrink-0 whitespace-nowrap rounded-full border px-3.5 py-1.5 text-sm font-medium", category === c && !q ? "border-brand bg-brand text-white shadow-sm" : "border-slate-300 bg-white text-slate-700")}>
+                  {c === "all" ? "All" : c} <span className={cx("text-xs", category === c && !q ? "text-white/80" : "text-slate-400")}>{n}</span>
                 </button>
               ))}
             </div>
@@ -393,24 +428,35 @@ export default function POS() {
               const inCart = qtyInCart(p.id);
               const left = p.stock_qty - inCart;
               return (
-                <button key={p.id} onClick={() => add(p)} disabled={left <= 0}
-                  className={cx("group relative flex flex-col overflow-hidden rounded-2xl border bg-white text-left transition active:scale-[0.98] disabled:opacity-50",
-                    inCart ? "border-brand ring-2 ring-brand-200" : "border-slate-200 hover:border-brand-300")}>
-                  <div className={cx("w-full bg-slate-100", p.image_url ? "aspect-[4/3]" : "aspect-[5/2]")}>
-                    <ProductThumb product={p} iconClass="size-8" />
-                  </div>
-                  <div className="flex flex-1 flex-col p-2.5">
-                    <p className="line-clamp-2 text-sm font-semibold leading-tight">{p.name}</p>
-                    <p className="mt-0.5 truncate text-xs text-slate-500">{[p.variant_label, p.brand, p.model].filter(Boolean).join(" · ") || " "}</p>
-                    <div className="mt-auto flex items-end justify-between pt-1.5">
-                      <span className="tabular text-[15px] font-bold text-brand-700">{fmtMoney(p.target_price, cur)}</span>
-                      <span className={cx("text-xs font-medium", left <= 0 ? "text-red-600" : left <= p.low_stock_threshold ? "text-amber-700" : "text-slate-500")}>
-                        {left <= 0 ? "Out" : `${left} left`}
-                      </span>
+                <div key={p.id}
+                  className={cx("group relative flex flex-col overflow-hidden rounded-2xl border bg-white text-left transition",
+                    inCart ? "border-brand ring-2 ring-brand-200" : "border-slate-200 hover:border-brand-300", left <= 0 && !inCart && "opacity-50")}>
+                  <button type="button" onClick={() => add(p)} disabled={left <= 0} className="flex flex-1 flex-col text-left active:scale-[0.98] disabled:cursor-not-allowed">
+                    <div className={cx("w-full bg-slate-100", p.image_url ? "aspect-[4/3]" : "aspect-[5/2]")}>
+                      <ProductThumb product={p} iconClass="size-8" />
                     </div>
-                  </div>
-                  {inCart > 0 && <span className="absolute right-2 top-2 grid size-7 place-items-center rounded-full bg-brand text-sm font-bold text-white">{inCart}</span>}
-                </button>
+                    <div className="flex w-full flex-1 flex-col p-2.5">
+                      <p className="line-clamp-2 text-sm font-semibold leading-tight">{p.name}</p>
+                      <p className="mt-0.5 truncate text-xs text-slate-500">{[p.variant_label, p.brand, p.model].filter(Boolean).join(" · ") || " "}</p>
+                      <div className="mt-auto flex items-end justify-between pt-1.5">
+                        <span className="tabular text-[15px] font-bold text-brand-700">{fmtMoney(p.target_price, cur)}</span>
+                        <span className={cx("text-xs font-medium", left <= 0 ? "text-red-600" : left <= p.low_stock_threshold ? "text-amber-700" : "text-slate-500")}>
+                          {left <= 0 ? (inCart ? "All in cart" : "Out") : `${left} left`}
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                  {inCart > 0 && (
+                    <div className="flex items-center gap-1 border-t border-brand-100 bg-brand-50 p-1.5">
+                      <button type="button" onClick={() => setQtyFor(p, qtyInCart(p.id) - qtyOverride(p.id) - 1)} aria-label={`One less ${p.name}`}
+                        className="grid size-9 shrink-0 place-items-center rounded-lg bg-white text-brand shadow-sm ring-1 ring-brand-200 active:scale-95"><Minus className="size-4" /></button>
+                      <QtyBox value={inCart - qtyOverride(p.id)} max={p.stock_qty - qtyOverride(p.id)} label={`Quantity of ${p.name}`} onChange={(n) => setQtyFor(p, n)} />
+                      <button type="button" onClick={() => setQtyFor(p, inCart - qtyOverride(p.id) + 1)} disabled={left <= 0} aria-label={`One more ${p.name}`}
+                        className="grid size-9 shrink-0 place-items-center rounded-lg bg-brand text-white shadow-sm active:scale-95 disabled:opacity-40"><Plus className="size-4" /></button>
+                    </div>
+                  )}
+                  {inCart > 0 && <span className="pointer-events-none absolute right-2 top-2 grid size-7 place-items-center rounded-full bg-brand text-sm font-bold text-white">{inCart}</span>}
+                </div>
               );
             })}
           </div>
@@ -544,5 +590,20 @@ function CartPanel({ lines, total, cur, onQty, onPrice, onRemove, onRequest, onC
       })}
       <li className="flex justify-between py-3 text-lg font-bold lg:px-4"><span>Total</span><span className="tabular">{fmtMinor(total, cur)}</span></li>
     </ul>
+  );
+}
+
+/** Typed quantity on a product card; applies on blur / Enter. */
+function QtyBox({ value, max, label, onChange }: { value: number; max: number; label: string; onChange: (n: number) => void }) {
+  const [text, setText] = useState(String(value));
+  const [focus, setFocus] = useState(false);
+  const shown = focus ? text : String(value);
+  const apply = () => { const n = parseInt(text, 10); onChange(Number.isNaN(n) ? value : n); setFocus(false); };
+  return (
+    <input type="text" inputMode="numeric" pattern="[0-9]*" aria-label={label} value={shown} title={`Max ${max}`}
+      onFocus={(e) => { setText(String(value)); setFocus(true); setTimeout(() => e.target.select(), 0); }}
+      onChange={(e) => setText(e.target.value.replace(/\D/g, "").slice(0, 5))} onBlur={apply}
+      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+      className="tabular h-9 min-w-0 flex-1 rounded-lg border border-brand-200 bg-white text-center text-base font-bold text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/20" />
   );
 }

@@ -122,7 +122,10 @@ export function BizProvider({ children, fallback }: { children: React.ReactNode;
     const role = membership.role;
     const isOwner = role === "owner";
     const hasSection = (s: string | null) => isOwner || membership.all_sections || (!!s && (membership.section_ids || []).includes(s));
-    const canViewCosts = (s?: string | null) => isOwner || (["section_owner", "manager", "accountant"].includes(role) && membership.can_view_costs && (s === undefined ? true : hasSection(s ?? null)));
+    // financial access can be limited to some of the person's sections (cost_section_ids)
+    const costSecs = membership.cost_section_ids ?? null;
+    const canViewCosts = (s?: string | null) => isOwner || (["section_owner", "manager", "accountant"].includes(role) && membership.can_view_costs &&
+      (s === undefined ? (costSecs === null || costSecs.length > 0) : hasSection(s ?? null) && (costSecs === null || (!!s && costSecs.includes(s)))));
     const canManage = (s?: string | null) => isOwner || (["section_owner", "manager"].includes(role) && (s === undefined ? true : hasSection(s ?? null)));
     const canApprove = (s?: string | null) => isOwner || (role === "section_owner" && (s === undefined ? true : hasSection(s ?? null)));
     const shifts = ((snap as Snapshot & { shifts?: Shift[] }).shifts || []);

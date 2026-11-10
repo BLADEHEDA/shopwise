@@ -355,5 +355,22 @@ select add_payment(t_get('sale_o'), t_get('other'), 1000, null, 'Bitcoin');
 select t_ok((select payment_status = 'paid' and balance_due = 0 and amount_paid = 2800 from sales where id = t_get('sale_o')), 'balance completed with a labelled Other payment');
 select t_ok((select string_agg(method_name, ',' order by created_at, amount) = 'Cash,Bank transfer,Bitcoin' or count(*) = 3 from payments where sale_id = t_get('sale_o')), 'all three payments kept on the sale');
 
+-- financial access limited to some sections; removing people
+select t_as('frank@test.cm');
+select update_member((select id from memberships where user_id = (select user_id from profiles where email = 'partner@test.cm')), 'section_owner', true, '{}', true, true);
+select set_member_cost_sections((select id from memberships where user_id = (select user_id from profiles where email = 'partner@test.cm')), array[t_get('comp')]);
+select t_as('partner@test.cm');
+select t_ok(can_view_costs(t_get('biz'), t_get('comp')) and not can_view_costs(t_get('biz'), t_get('elec')), 'financial access only for the ticked section');
+select t_ok(has_section(t_get('biz'), t_get('elec')), 'still works in the other section (stock and prices)');
+select t_ok((select count(*) = 0 from product_costs where section_id = t_get('elec')), 'no cost prices from the hidden section');
+select t_expect_error($$select remove_member((select id from memberships where user_id = (select user_id from profiles where email = 'staff@test.cm')))$$, 'Only a super admin');
+select t_as('frank@test.cm');
+select set_member_cost_sections((select id from memberships where user_id = (select user_id from profiles where email = 'partner@test.cm')), null);
+select t_ok((select cost_section_ids is null from memberships where user_id = (select user_id from profiles where email = 'partner@test.cm')), 'financial access back to all sections');
+select t_expect_error($$select remove_member((select id from memberships where business_id = t_get('biz') and user_id = auth.uid()))$$, 'your own account');
+select remove_member((select id from memberships where business_id = t_get('biz') and user_id = (select user_id from profiles where email = 'manager@test.cm')));
+select t_ok(not exists (select 1 from memberships where business_id = t_get('biz') and user_id = (select user_id from profiles where email = 'manager@test.cm')), 'super admin removed the manager');
+select t_ok(exists (select 1 from audit_log where business_id = t_get('biz') and action = 'member_removed'), 'removal is in the audit log');
+
 reset role;
 \echo ALL TESTS PASSED

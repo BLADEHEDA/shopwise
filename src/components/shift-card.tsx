@@ -1,5 +1,7 @@
 "use client";
 import { useState } from "react";
+import { useDialog } from "@/components/dialog";
+import { chime } from "@/lib/feedback";
 import { Clock } from "lucide-react";
 import { useBiz } from "./biz";
 import { supabase } from "@/lib/supabase";
@@ -10,20 +12,21 @@ import { duration, errorMessage, fmtTime } from "@/lib/format";
 export function ShiftCard({ compact }: { compact?: boolean }) {
   const { shift, business, refreshShift, online } = useBiz();
   const toast = useToast();
+  const dialog = useDialog();
   const [busy, setBusy] = useState(false);
 
   async function clockIn() {
     setBusy(true);
     const { error } = await supabase().rpc("clock_in", { p_business: business.id });
-    if (error) toast(errorMessage(error), "error"); else { await refreshShift(); toast("Clocked in. Have a great shift!"); }
+    if (error) toast(errorMessage(error), "error"); else { chime("in"); await refreshShift(); toast("Clocked in. Have a great shift!"); }
     setBusy(false);
   }
   async function clockOut() {
     if (!shift) return;
-    if (!confirm("Clock out and end your shift?")) return;
+    if (!(await dialog.confirm({ title: "Clock out?", message: <>This ends your shift that started at <b>{fmtTime(shift.started_at, business.timezone)}</b> ({duration(shift.started_at)}).</>, confirmLabel: "Clock out", tone: "warning" }))) return;
     setBusy(true);
     const { error } = await supabase().rpc("clock_out", { p_shift: shift.id, p_note: null, p_ended_at: null });
-    if (error) toast(errorMessage(error), "error"); else { await refreshShift(); toast("Clocked out."); }
+    if (error) toast(errorMessage(error), "error"); else { chime("out"); await refreshShift(); toast("Clocked out. See you next time!"); }
     setBusy(false);
   }
 

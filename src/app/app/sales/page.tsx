@@ -1,5 +1,6 @@
 "use client";
 import { Suspense, useCallback, useEffect, useState } from "react";
+import { useDialog } from "@/components/dialog";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Receipt, Search, CloudUpload, RefreshCw, Trash2 } from "lucide-react";
@@ -9,7 +10,9 @@ import { Alert, Badge, Button, Card, EmptyState, Input, PageHeader, Spinner, Tab
 import { supabase } from "@/lib/supabase";
 import { db, discardItem, onQueueChange, retryItem, type QueuedSale } from "@/lib/offline";
 import { fmtMoney } from "@/lib/money";
-import { fmtDateTime, receiptLabel, todayIn } from "@/lib/format";
+import { cx, fmtDateTime, receiptLabel, startOfMonthIn, todayIn } from "@/lib/format";
+
+const fmtDay = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 import type { Sale } from "@/lib/types";
 
 type Tab = "all" | "paid" | "due" | "review" | "voided" | "queue";
@@ -21,6 +24,15 @@ function SalesInner() {
   const [tab, setTab] = useState<Tab>(initial);
   const [from, setFrom] = useState(todayIn(business.timezone, -6));
   const [to, setTo] = useState(todayIn(business.timezone));
+  const tz = business.timezone;
+  const today = todayIn(tz);
+  const presets = [
+    { label: "Today", from: today, to: today },
+    { label: "Yesterday", from: todayIn(tz, -1), to: todayIn(tz, -1) },
+    { label: "Last 7 days", from: todayIn(tz, -6), to: today },
+    { label: "This month", from: startOfMonthIn(tz), to: today },
+    { label: "Last 30 days", from: todayIn(tz, -29), to: today },
+  ];
   const [q, setQ] = useState("");
   const [sales, setSales] = useState<Sale[] | null>(null);
   const [queue, setQueue] = useState<QueuedSale[]>([]);
@@ -74,16 +86,35 @@ function SalesInner() {
         <QueueList queue={queue} cur={cur} />
       ) : (
         <>
-          <div className="mb-3 grid gap-2 sm:grid-cols-[1fr_auto_auto]">
+          <div className="mb-3 space-y-2">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-              <Input className="pl-9" placeholder="Receipt number, customer name or phone" value={q} onChange={(e) => setQ(e.target.value)} />
+              <Input className="pl-9" placeholder="Search receipt number, customer name or phone" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search sales" />
             </div>
             {(tab === "all" || tab === "paid" || tab === "voided") && (
-              <>
-                <Input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} aria-label="From date" />
-                <Input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} aria-label="To date" />
-              </>
+              <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Period</p>
+                <div className="mb-3 flex gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none]" role="group" aria-label="Quick periods">
+                  {presets.map((p) => {
+                    const on = from === p.from && to === p.to;
+                    return (
+                      <button key={p.label} type="button" onClick={() => { setFrom(p.from); setTo(p.to); }} aria-pressed={on}
+                        className={cx("h-9 shrink-0 rounded-full border px-3 text-sm font-medium", on ? "border-brand bg-brand text-white" : "border-slate-300 bg-white text-slate-700 hover:border-brand")}>
+                        {p.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="grid grid-cols-2 gap-2 sm:max-w-md">
+                  <label className="text-xs font-medium text-slate-600">From (start date)
+                    <Input type="date" className="mt-1" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
+                  </label>
+                  <label className="text-xs font-medium text-slate-600">To (end date)
+                    <Input type="date" className="mt-1" value={to} min={from} onChange={(e) => setTo(e.target.value)} />
+                  </label>
+                </div>
+                <p className="mt-2 text-xs text-slate-500">Showing sales from <b className="text-ink">{fmtDay(from)}</b> to <b className="text-ink">{fmtDay(to)}</b>{from === to ? " (one day)" : ""}.</p>
+              </div>
             )}
           </div>
           {sales === null ? <Spinner /> : filtered.length === 0 ? (
@@ -131,6 +162,7 @@ function todayFromIso(iso: string, tz: string) {
 }
 
 function QueueList({ queue, cur }: { queue: QueuedSale[]; cur: string }) {
+  const dialog = useDialog();
   const [busy, setBusy] = useState<string | null>(null);
   if (!queue.length) {
     return <EmptyState icon={<CloudUpload className="size-6" />} title="Nothing waiting to sync">Sales made without internet appear here until they reach the server.</EmptyState>;
@@ -153,7 +185,7 @@ function QueueList({ queue, cur }: { queue: QueuedSale[]; cur: string }) {
               <Alert tone="danger" className="mt-3">{item.error}</Alert>
               <div className="mt-3 flex gap-2">
                 <Button size="sm" variant="secondary" loading={busy === item.client_tx_id} onClick={async () => { setBusy(item.client_tx_id); await retryItem(item.client_tx_id); setBusy(null); }}><RefreshCw className="size-4" /> Retry</Button>
-                <Button size="sm" variant="ghost" onClick={() => { if (confirm("Discard this offline sale? It will not be recorded.")) discardItem(item.client_tx_id); }}><Trash2 className="size-4" /> Discard</Button>
+                <Button size="sm" variant="ghost" onClick={async () => { if (await dialog.confirm({ title: "Discard this offline sale?", message: "It will not be recorded and stock will not change.", confirmLabel: "Discard", tone: "danger" })) discardItem(item.client_tx_id); }}><Trash2 className="size-4" /> Discard</Button>
               </div>
             </>
           )}

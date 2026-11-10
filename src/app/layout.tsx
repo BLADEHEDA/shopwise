@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { BrandProvider } from "@/lib/brand";
 import { ToastProvider } from "@/components/toast";
+import { DialogProvider } from "@/components/dialog";
 import { ServiceWorker } from "@/components/service-worker";
 import { getBrandServer } from "@/lib/brand-server";
 
@@ -30,7 +31,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en">
       <body>
         <BrandProvider>
-          <ToastProvider>{children}</ToastProvider>
+          <ToastProvider><DialogProvider>{children}</DialogProvider></ToastProvider>
         </BrandProvider>
         <ServiceWorker />
       </body>

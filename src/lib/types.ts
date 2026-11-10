@@ -33,6 +33,7 @@ export interface Membership {
   role: Role;
   all_sections: boolean;
   can_view_costs: boolean;
+  cost_section_ids?: string[] | null;
   active: boolean;
   businesses?: Business;
   section_ids?: string[];

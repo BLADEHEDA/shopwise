@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useDialog } from "@/components/dialog";
 import Link from "next/link";
 import { ChevronRight, Users, Palette, History, Plus, LogOut } from "lucide-react";
 import { useBiz } from "@/components/biz";
@@ -253,12 +254,13 @@ function LoginSecurity() {
 /** Platform admin: status of the shared demo shop, and a reset button. */
 function DemoControls() {
   const toast = useToast();
+  const dialog = useDialog();
   const [info, setInfo] = useState<{ reset_at: string | null; accounts: { email: string; label: string }[]; password: string } | null | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const load = () => { supabase().rpc("demo_info").then(({ data }) => setInfo(data || null)); };
   useEffect(load, []);
   async function reset() {
-    if (!confirm("Reset the demo shop? All test sales, products and changes made by testers will be replaced with fresh sample data. Real shops are not touched.")) return;
+    if (!(await dialog.confirm({ title: "Reset the demo shop?", message: "All test sales, products and changes made by testers will be replaced with fresh sample data. Real shops are not touched.", confirmLabel: "Reset demo", tone: "warning" }))) return;
     setBusy(true);
     const { error } = await supabase().rpc("demo_reset_by_admin");
     setBusy(false);

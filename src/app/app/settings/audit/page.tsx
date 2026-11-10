@@ -5,7 +5,8 @@ import { ChevronLeft } from "lucide-react";
 import { useBiz } from "@/components/biz";
 import { Alert, Card, PageHeader, Spinner } from "@/components/ui";
 import { supabase } from "@/lib/supabase";
-import { fmtDateTime } from "@/lib/format";
+import { fmtDateTime, ROLE_LABEL } from "@/lib/format";
+import type { Role } from "@/lib/types";
 
 interface Entry { id: number; actor_id: string | null; action: string; entity: string | null; entity_id: string | null; details: Record<string, unknown>; created_at: string }
 
@@ -18,25 +19,25 @@ const LABEL: Record<string, string> = {
   purchase_received: "Purchase received", cost_price_set: "Cost price changed", product_price_changed: "Product price changed",
   products_imported: "Products imported", expense_approved: "Expense approved", expense_rejected: "Expense rejected",
   shift_closed_by_manager: "Shift closed by manager", brand_changed: "Branding changed",
+  member_removed: "Person removed from the shop", member_cost_sections: "Financial access changed", payment_added: "Payment recorded on a sale",
+  sale_completed: "Sale completed", feedback_sent: "Feedback sent",
 };
 
 export default function AuditPage() {
   const { business, isOwner } = useBiz();
   const [rows, setRows] = useState<Entry[] | null>(null);
   const [names, setNames] = useState<Record<string, string>>({});
+  const [roles, setRoles] = useState<Record<string, Role>>({});
 
   useEffect(() => {
     const sb = supabase();
     sb.from("audit_log").select("*").eq("business_id", business.id).order("created_at", { ascending: false }).limit(300).then(async ({ data }) => {
       const list = (data || []) as Entry[];
       setRows(list);
-      const ids = Array.from(new Set(list.map((r) => r.actor_id).filter(Boolean))) as string[];
-      if (ids.length) {
-        const { data: p } = await sb.from("profiles").select("user_id, full_name, email").in("user_id", ids);
-        const m: Record<string, string> = {};
-        for (const x of (p || []) as { user_id: string; full_name: string | null; email: string | null }[]) m[x.user_id] = x.full_name || x.email || "";
-        setNames(m);
-      }
+      const { data: actors } = await sb.rpc("audit_actors", { p_business: business.id });
+      const n: Record<string, string> = {}, r: Record<string, Role> = {};
+      for (const x of (actors || []) as { user_id: string; name: string; role: Role | null }[]) { n[x.user_id] = x.name; if (x.role) r[x.user_id] = x.role; }
+      setNames(n); setRoles(r);
     });
   }, [business.id]);
 
@@ -55,7 +56,7 @@ export default function AuditPage() {
                   <p className="text-sm font-medium">{LABEL[r.action] || r.action}</p>
                   <p className="shrink-0 text-xs text-slate-500">{fmtDateTime(r.created_at, business.timezone)}</p>
                 </div>
-                <p className="text-xs text-slate-500">by {r.actor_id ? names[r.actor_id] || "…" : "system"}</p>
+                <p className="text-xs text-slate-500">by {r.actor_id ? <><b className="font-semibold text-slate-700">{names[r.actor_id] || "…"}</b> ({roles[r.actor_id] ? ROLE_LABEL[roles[r.actor_id]] : "no longer in the shop"})</> : "the system"}</p>
                 {Object.keys(r.details || {}).length > 0 && (
                   <details className="mt-1"><summary className="cursor-pointer text-xs text-brand">Details</summary>
                     <pre className="mt-1 overflow-x-auto rounded-lg bg-slate-50 p-2 text-[11px]">{JSON.stringify(r.details, null, 2)}</pre>

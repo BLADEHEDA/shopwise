@@ -188,7 +188,7 @@ export function Sheet({ open, onClose, title, children, footer, wide }: {
           <button onClick={onClose} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100" aria-label="Close"><X className="size-5" /></button>
         </div>
         <div className="overflow-y-auto px-5 py-4">{children}</div>
-        {footer && <div className="safe-bottom border-t border-slate-100 px-5 py-3">{footer}</div>}
+        {footer && <div className="border-t border-slate-100 px-5 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">{footer}</div>}
       </div>
     </div>
   );

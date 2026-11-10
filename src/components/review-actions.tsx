@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { useDialog } from "@/components/dialog";
 import { CircleCheck, CircleX } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { errorMessage } from "@/lib/format";
@@ -9,9 +10,10 @@ import { useToast } from "./toast";
 
 export function ReviewActions({ sale, onDone }: { sale: Sale; onDone: () => void }) {
   const toast = useToast();
+  const dialog = useDialog();
   const [busy, setBusy] = useState<"a" | "r" | null>(null);
   async function decide(accept: boolean) {
-    const reason = accept ? "Accepted after review" : prompt("Why are you rejecting this sale? (e.g. item was out of stock)") || "";
+    const reason = accept ? "Accepted after review" : await dialog.prompt({ title: "Reject this sale?", message: "Stock will not be deducted. The shopkeeper sees your reason.", label: "Why are you rejecting it?", placeholder: "e.g. item was out of stock", required: true, confirmLabel: "Reject sale", tone: "danger" });
     if (!accept && !reason) return;
     setBusy(accept ? "a" : "r");
     const { error } = await supabase().rpc("resolve_sale_review", { p_sale: sale.id, p_accept: accept, p_reason: reason });

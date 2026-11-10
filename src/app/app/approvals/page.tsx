@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import { useDialog } from "@/components/dialog";
 import Link from "next/link";
 import { ShieldCheck, Check, X, ClipboardCheck } from "lucide-react";
 import { useBiz } from "@/components/biz";
@@ -22,6 +23,7 @@ export default function ApprovalsPage() {
   const biz = useBiz();
   const { business, userId } = biz;
   const toast = useToast();
+  const dialog = useDialog();
   const cur = business.currency;
   const [ovs, setOvs] = useState<Ov[] | null>(null);
   const [exps, setExps] = useState<Exp[]>([]);
@@ -47,7 +49,8 @@ export default function ApprovalsPage() {
   useEffect(() => { load(); const t = setInterval(load, 10000); return () => clearInterval(t); }, [load]);
 
   async function decideExpense(e: Exp, approve: boolean) {
-    const note = approve ? null : prompt("Reason for rejecting (optional)") ?? null;
+    let note: string | null = null;
+    if (!approve) { note = await dialog.prompt({ title: "Reject this expense?", label: "Reason (optional)", placeholder: "e.g. no receipt", confirmLabel: "Reject", tone: "danger" }); if (note === null) return; }
     const { error } = await supabase().rpc("decide_expense", { p_expense: e.id, p_approve: approve, p_note: note });
     if (error) toast(errorMessage(error), "error"); else { toast(approve ? "Expense approved" : "Expense rejected"); load(); }
   }
@@ -82,7 +85,8 @@ export default function ApprovalsPage() {
                     <div className="mt-3 flex gap-2">
                       <Button size="sm" variant="success" onClick={() => setDeciding(o)}><ShieldCheck className="size-4" /> Approve…</Button>
                       <Button size="sm" variant="secondary" onClick={async () => {
-                        const note = prompt("Reason for declining (shown to staff, optional)") ?? null;
+                        const note = await dialog.prompt({ title: "Decline this price?", message: "The shopkeeper will have to sell at the normal price.", label: "Reason (shown to staff, optional)", confirmLabel: "Decline", tone: "danger" });
+                        if (note === null) return;
                         const { error } = await supabase().rpc("decide_price_override", { p_request: o.id, p_approve: false, p_approved_price: null, p_note: note });
                         if (error) toast(errorMessage(error), "error"); else { toast("Declined"); load(); }
                       }}><X className="size-4" /> Decline</Button>

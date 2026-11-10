@@ -1,5 +1,6 @@
 "use client";
 import { Suspense, useCallback, useEffect, useState } from "react";
+import { useDialog } from "@/components/dialog";
 import { useSearchParams } from "next/navigation";
 import { Plus, Wallet, Check, X } from "lucide-react";
 import { useBiz } from "@/components/biz";
@@ -20,6 +21,7 @@ function ExpensesInner() {
   const biz = useBiz();
   const { business, sections, userId } = biz;
   const toast = useToast();
+  const dialog = useDialog();
   const [tab, setTab] = useState<"pending" | "approved" | "rejected" | "all">("all");
   const [rows, setRows] = useState<Expense[] | null>(null);
   const [open, setOpen] = useState(useSearchParams().get("new") === "1");
@@ -37,7 +39,8 @@ function ExpensesInner() {
   const total = (rows || []).filter((e) => e.status === "approved").reduce((a, e) => a + Number(e.amount), 0);
 
   async function decide(e: Expense, approve: boolean) {
-    const note = approve ? null : prompt("Reason for rejecting (optional)") ?? null;
+    let note: string | null = null;
+    if (!approve) { note = await dialog.prompt({ title: "Reject this expense?", label: "Reason (optional)", placeholder: "e.g. no receipt", confirmLabel: "Reject", tone: "danger" }); if (note === null) return; }
     const { error } = await supabase().rpc("decide_expense", { p_expense: e.id, p_approve: approve, p_note: note });
     if (error) toast(errorMessage(error), "error"); else { toast(approve ? "Expense approved" : "Expense rejected"); load(); }
   }
