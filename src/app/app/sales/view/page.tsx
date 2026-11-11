@@ -76,7 +76,8 @@ function ViewInner() {
     return [
       `${business.name} — Receipt ${receiptLabel(sale.receipt_no)}`,
       fmtDateTime(sale.sold_at, business.timezone), "", ...rows, "",
-      `TOTAL: ${fmtMoney(sale.total, cur)}`, ...pays, `PAID: ${fmtMoney(sale.amount_paid, cur)}`,
+      `TOTAL: ${fmtMoney(sale.total, cur)}`, "", "PAYMENT HISTORY", ...(pays.length ? pays.map((x, i) => `${i + 1}. ${x}`) : ["No payment received yet"]), "",
+      `AMOUNT PAID: ${fmtMoney(sale.amount_paid, cur)}`,
       sale.balance_due > 0 ? `BALANCE DUE: ${fmtMoney(sale.balance_due, cur)} (part payment)` : "PAID IN FULL",
       "", business.receipt_footer || "", business.phone || "",
     ].filter((x) => x !== undefined).join("\n");
@@ -188,18 +189,23 @@ function ViewInner() {
           ))}
         </ul>
         <div className="mt-4 space-y-1 border-t border-dashed border-slate-300 pt-3 text-sm">
-          <div className="flex justify-between text-base font-bold"><span>Total</span><span className="tabular">{fmtMoney(s.total, cur)}</span></div>
-          {payments.length > 0 && <p className="pt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Payments</p>}
-          {payments.map((p) => (
+          {/* one continuous receipt: every payment, in order, with its date */}
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Payment history</p>
+          {payments.length === 0 && <p className="text-slate-500">No payment received yet</p>}
+          {payments.map((p, i) => (
             <div key={p.id} className="flex justify-between gap-2 text-slate-600">
-              <span>{p.method_name}{p.reference ? ` (${p.reference})` : ""} <span className="text-xs text-slate-400">· {fmtDateTime(p.created_at, business.timezone)}</span>
+              <span>
+                <span className="text-slate-400">{i + 1}.</span> {fmtDateTime(p.created_at, business.timezone)} · {p.method_name}{p.reference ? ` (${p.reference})` : ""}
                 {p.proof_path && <button type="button" onClick={() => viewProof(p.proof_path!)} className="no-print ml-1 inline-flex items-center gap-0.5 rounded bg-emerald-50 px-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"><Paperclip className="size-3" /> proof</button>}
               </span><span className="tabular whitespace-nowrap">{fmtMoney(p.amount, cur)}</span>
             </div>
           ))}
-          {payments.length > 1 && <div className="flex justify-between text-slate-700"><span>Total paid</span><span className="tabular whitespace-nowrap font-semibold">{fmtMoney(s.amount_paid, cur)}</span></div>}
-          <div className={`flex justify-between border-t border-slate-200 pt-1 font-bold ${s.balance_due > 0 ? "text-amber-700" : "text-emerald-700"}`}>
-            <span>{s.balance_due > 0 ? "Balance due" : "Paid in full"}</span><span className="tabular">{fmtMoney(s.balance_due > 0 ? s.balance_due : s.amount_paid, cur)}</span>
+          <div className="mt-1 space-y-0.5 border-t border-slate-200 pt-1.5">
+            <div className="flex justify-between text-base font-bold"><span>Total</span><span className="tabular whitespace-nowrap">{fmtMoney(s.total, cur)}</span></div>
+            <div className="flex justify-between text-slate-700"><span>Amount paid</span><span className="tabular whitespace-nowrap font-semibold">{fmtMoney(s.amount_paid, cur)}</span></div>
+            <div className={`flex justify-between text-base font-bold ${s.balance_due > 0 ? "text-amber-700" : "text-emerald-700"}`}>
+              <span>{s.balance_due > 0 ? "Balance due" : "Paid in full ✓"}</span><span className="tabular">{fmtMoney(s.balance_due > 0 ? s.balance_due : 0, cur)}</span>
+            </div>
           </div>
         </div>
         {business.receipt_footer && <p className="mt-4 text-center text-xs text-slate-500">{business.receipt_footer}</p>}
@@ -244,7 +250,13 @@ function PaymentSheet({ sale, methods, cur, onClose, onDone }: { sale: Sale; met
     if (!(toMinor(amount) > 0)) return setErr("Enter the amount received.");
     if (other && !label.trim()) return setErr("Say what the payment was (for example Bank transfer).");
     setBusy(true);
-    const { error } = await supabase().rpc("add_payment", { p_sale: sale.id, p_method: method, p_amount: minorToDecimal(toMinor(amount)), p_reference: refNo || null, p_label: other ? label.trim() : null, p_proof: proof });
+    const base = { p_sale: sale.id, p_method: method, p_amount: minorToDecimal(toMinor(amount)), p_reference: refNo || null };
+    let { error } = await supabase().rpc("add_payment", { ...base, p_label: other ? label.trim() : null, p_proof: proof });
+    // database not upgraded yet (older add_payment): still record the money
+    if (error && /could not find the function/i.test(error.message)) {
+      ({ error } = await supabase().rpc("add_payment", other ? { ...base, p_label: label.trim() } : base));
+      if (error && /could not find the function/i.test(error.message)) ({ error } = await supabase().rpc("add_payment", base));
+    }
     setBusy(false);
     if (error) setErr(errorMessage(error)); else onDone();
   }

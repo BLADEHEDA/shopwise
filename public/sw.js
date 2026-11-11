@@ -1,7 +1,8 @@
 /* Service worker: caches the app shell so staff can open the POS and queue
    sales without a connection. API calls (Supabase) are never cached here;
    product data is cached in IndexedDB by the app itself. */
-const CACHE = "sw-shell-v1";
+// bump on any change here: old caches are deleted on activate
+const CACHE = "sw-shell-v2";
 const SHELL = ["/app", "/app/pos", "/app/sales", "/login", "/manifest.webmanifest", "/api/icon/192"];
 
 self.addEventListener("install", (event) => {
@@ -47,7 +48,19 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Other same-origin GETs (icons, manifest, RSC payloads): stale-while-revalidate
+  // Next.js page data (RSC): always ask the network first. Serving an old copy
+  // after a new deploy mixes two versions of the app and crashes it.
+  if (req.headers.get("RSC") === "1" || url.searchParams.has("_rsc")) {
+    event.respondWith(
+      fetch(req).then((res) => {
+        if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); }
+        return res;
+      }).catch(async () => (await caches.match(req)) || Response.error()),
+    );
+    return;
+  }
+
+  // Other same-origin GETs (icons, manifest): stale-while-revalidate
   event.respondWith(
     caches.open(CACHE).then(async (cache) => {
       const hit = await cache.match(req);
