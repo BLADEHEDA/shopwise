@@ -90,9 +90,16 @@ begin
   end if;
   return new;
 end $$;
-drop trigger if exists guard_demo_accounts on auth.users;
-create trigger guard_demo_accounts before update on auth.users
+-- only create it if missing (dropping a trigger on auth.users needs more rights
+-- than the deploy connection may have; the function above is replaced anyway)
+do $t$ begin
+  if not exists (select 1 from pg_trigger where tgname = 'guard_demo_accounts' and tgrelid = 'auth.users'::regclass) then
+    create trigger guard_demo_accounts before update on auth.users
   for each row execute function public.guard_demo_accounts();
+  end if;
+exception when insufficient_privilege then
+  raise warning 'could not add a trigger on auth.users (%); run this file once in the Supabase SQL editor', sqlerrm;
+end $t$;
 
 -- Owners of the demo shop can't disable or demote the shared demo logins.
 create or replace function public.update_member(

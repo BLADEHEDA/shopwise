@@ -167,16 +167,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 const EXPECTED_SCHEMA = 9;
 function SchemaCheck() {
   const [have, setHave] = useState<number | null>(null);
+  const [fail, setFail] = useState<{ last_failed: string | null; last_error: string | null } | null>(null);
   useEffect(() => {
     let off = false;
-    supabase().rpc("shopwise_schema").then(({ data, error }) => { if (!off) setHave(error ? 0 : Number(data)); });
+    const sb = supabase();
+    sb.rpc("shopwise_schema").then(({ data, error }) => {
+      if (off) return;
+      const v = error ? 0 : Number(data);
+      setHave(v);
+      if (v < EXPECTED_SCHEMA) sb.rpc("shopwise_migration_status").then(({ data: st }) => {
+        const row = Array.isArray(st) ? st[0] : null;
+        if (!off && row?.last_error) setFail(row);
+      });
+    });
     return () => { off = true; };
   }, []);
   if (have === null || have >= EXPECTED_SCHEMA) return null;
   return (
     <div role="alert" className="mb-4 rounded-2xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-      <b>Your database is missing the latest update</b> (version {have || "8 or older"}, needs {EXPECTED_SCHEMA}). Some features won&apos;t work until it&apos;s applied.
-      In Vercel → Settings → Environment Variables, make sure <code className="rounded bg-white px-1">DATABASE_URL</code> is set (Supabase → Connect → Session pooler), then Redeploy.
+      <b>Your database is missing the latest update</b> (version {have || "8 or older"}, needs {EXPECTED_SCHEMA}). Some features won&apos;t work until it&apos;s applied.{" "}
+      {fail ? (
+        <>The upgrade <b>{fail.last_failed}</b> failed with: <code className="break-words rounded bg-white px-1">{fail.last_error}</code>. Send a screenshot of this to your developer.</>
+      ) : (
+        <>In Vercel → Settings → Environment Variables, make sure <code className="rounded bg-white px-1">DATABASE_URL</code> is set (Supabase → Connect → Direct → Session pooler), then Redeploy. The build log lines starting with <code className="rounded bg-white px-1">[migrate]</code> say what happened.</>
+      )}
     </div>
   );
 }

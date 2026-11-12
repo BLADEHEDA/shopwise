@@ -226,6 +226,9 @@ begin
         bucket_id = 'proofs' and public.proof_folder_ok(name)) $p$;
     end if;
   end if;
+exception when insufficient_privilege then
+  -- some hosts don't let the deploy connection change storage; everything else still upgrades
+  raise warning 'proof screenshots: could not set up storage (%). Run this file once in the Supabase SQL editor.', sqlerrm;
 end $$;
 
 -- finalize_sale: payments may carry a proof screenshot (same as 0007 otherwise)

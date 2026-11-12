@@ -9,9 +9,16 @@ begin
   return new;
 end $$;
 
-drop trigger if exists on_auth_user_email_changed on auth.users;
-create trigger on_auth_user_email_changed after update of email on auth.users
+-- only create it if missing (dropping a trigger on auth.users needs more rights
+-- than the deploy connection may have; the function above is replaced anyway)
+do $t$ begin
+  if not exists (select 1 from pg_trigger where tgname = 'on_auth_user_email_changed' and tgrelid = 'auth.users'::regclass) then
+    create trigger on_auth_user_email_changed after update of email on auth.users
   for each row execute function public.handle_user_email_change();
+  end if;
+exception when insufficient_privilege then
+  raise warning 'could not add a trigger on auth.users (%); run this file once in the Supabase SQL editor', sqlerrm;
+end $t$;
 
 -- refresh the API's function list
 notify pgrst, 'reload schema';
