@@ -168,7 +168,11 @@ function ViewInner() {
 
       <div ref={ref} className="print-area rounded-2xl border border-slate-200 bg-white p-5">
         <div className="text-center">
-          {business.logo_url && /* eslint-disable-next-line @next/next/no-img-element */ <img src={business.logo_url} alt="" className="mx-auto mb-2 h-12" crossOrigin="anonymous" />}
+          {business.logo_url && (
+            // plain <img>: the receipt is also drawn into a downloadable picture
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={business.logo_url} alt="" className="mx-auto mb-2 h-12" crossOrigin="anonymous" />
+          )}
           <p className="text-lg font-bold">{business.name}</p>
           {business.address && <p className="text-xs text-slate-500">{business.address}</p>}
           {business.phone && <p className="text-xs text-slate-500">{business.phone}</p>}
